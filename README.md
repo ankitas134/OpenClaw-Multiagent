@@ -31,7 +31,7 @@ This repository is a completely standalone project located outside of the origin
 The `.env` file in this directory is already pre-configured with your Groq API key:
 ```env
 LLM_PROVIDER=groq
-GROQ_API_KEY=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
+GROQ_API_KEY=YOUR_API_KEY
 GROQ_MODEL=llama-3.3-70b-versatile
 ```
 
