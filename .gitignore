@@ -1,0 +1,21 @@
+# Environment & Secrets
+.env
+*.env
+
+# Python / Pytest / Bytecode
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Virtual Environments
+.venv/
+venv/
+ENV/
+
+# Platform Workspaces & Temp Data
+workspaces/
+data/

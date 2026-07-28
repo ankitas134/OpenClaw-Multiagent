@@ -462,6 +462,10 @@ with tab_agents:
                 if "main" not in existing_threads:
                     existing_threads.insert(0, "main")
 
+                th_key = f"active_thread_{selected_agent_id}"
+                if th_key in st.session_state and st.session_state[th_key] not in existing_threads:
+                    existing_threads.append(st.session_state[th_key])
+
                 col_th1, col_th2 = st.columns([3, 1])
                 with col_th1:
                     selected_thread = st.selectbox(
@@ -473,10 +477,11 @@ with tab_agents:
                     st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
                     if st.button("➕ New Thread", key=f"new_th_{selected_agent_id}", use_container_width=True):
                         new_th_name = f"thread_{int(time.time())}"
-                        st.session_state[f"active_thread_{selected_agent_id}"] = new_th_name
+                        st.session_state[th_key] = new_th_name
+                        st.session_state[f"thread_sel_{selected_agent_id}"] = new_th_name
                         st.rerun()
 
-                active_thread_id = st.session_state.get(f"active_thread_{selected_agent_id}", selected_thread)
+                active_thread_id = selected_thread
 
                 msgs_res = requests.get(f"{API_BASE}/api/agents/{selected_agent_id}/messages?threadId={active_thread_id}", headers=get_headers())
                 messages = msgs_res.json() if msgs_res.status_code == 200 else []
@@ -498,6 +503,16 @@ with tab_agents:
                         headers=get_headers()
                     )
                     if post_res.status_code in [200, 201, 202]:
+                        # Poll for up to 6 seconds for Celery LLM worker reply to finish
+                        start_time = time.time()
+                        initial_count = len(messages)
+                        while time.time() - start_time < 6.0:
+                            time.sleep(0.5)
+                            poll_res = requests.get(f"{API_BASE}/api/agents/{selected_agent_id}/messages?threadId={active_thread_id}", headers=get_headers())
+                            if poll_res.status_code == 200:
+                                current_msgs = poll_res.json()
+                                if len(current_msgs) > initial_count + 1 or (current_msgs and current_msgs[-1]["sender"] == "agent"):
+                                    break
                         st.rerun()
                     else:
                         st.error(parse_response_error(post_res, "Failed to send message."))

@@ -1,0 +1,47 @@
+COMPANY FINANCIAL SUMMARY
+Zenith Labs Pvt Ltd
+Period: Q2 2026 (Apr - Jun)
+
+--------------------------------------
+1. REVENUE
+--------------------------------------
+Product/Service Sales:        ₹ 12,40,000
+Other Income:                 ₹ 1,10,000
+Total Revenue:                ₹ 13,50,000
+
+--------------------------------------
+2. EXPENSES
+--------------------------------------
+Salaries & Wages:             ₹ 6,80,000
+Rent & Utilities:             ₹ 1,20,000
+Marketing:                    ₹ 1,50,000
+Software/Tools/Hosting:       ₹ 90,000
+Miscellaneous:                ₹ 40,000
+Total Expenses:               ₹ 10,80,000
+
+--------------------------------------
+3. PROFIT / LOSS
+--------------------------------------
+Net Profit (Revenue - Expenses): ₹ 2,70,000
+
+--------------------------------------
+4. CASH POSITION
+--------------------------------------
+Opening Balance:              ₹ 5,00,000
+Closing Balance:              ₹ 7,70,000
+
+--------------------------------------
+5. NOTES
+--------------------------------------
+- Marketing spend up 20% this quarter due to new campaign
+- Hosting costs expected to rise next quarter with scaling
+
+--------------------------------------
+6. FINANCE RULES / GUIDELINES
+--------------------------------------
+- No expense above ₹50,000 without manager approval
+- Keep at least 3 months of expenses as reserve cash
+- All invoices must be logged within 48 hours
+- Monthly reconciliation of accounts by the 5th of next month
+- No cash transactions above ₹10,000 without a receipt
+- Review budget vs actuals every quarter

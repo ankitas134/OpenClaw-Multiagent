@@ -3,6 +3,8 @@ import docker
 from typing import Dict, Any
 from app.core.config import settings
 
+from app.core.sandbox_config import SERVER_SANDBOX_SETTINGS
+
 def get_docker_client():
     return docker.from_env()
 
@@ -41,15 +43,18 @@ def spinup_agent_container(
     team_context: str,
     agent_name: str,
     task_context: str,
-    config: Dict[str, Any]
+    config: Dict[str, Any] = None
 ) -> str:
     try:
         client = get_docker_client()
         client.ping()
     except Exception as ex:
-        print(f"[Docker] Docker daemon unavailable ({ex}). Falling back to Local Sandboxed Workspace.")
-        workspace_dir = prepare_agent_workspace(agent_id, team_name, team_context, agent_name, task_context)
-        return f"local-agent-{agent_id}"
+        if settings.ALLOW_UNSANDBOXED_DEV_MODE:
+            print(f"[Docker] Docker daemon unavailable ({ex}). ALLOW_UNSANDBOXED_DEV_MODE is enabled — using Local Sandboxed Workspace.")
+            workspace_dir = prepare_agent_workspace(agent_id, team_name, team_context, agent_name, task_context)
+            return f"local-dev-agent-{agent_id}"
+        print(f"[Docker] Docker daemon unavailable ({ex}). Sandboxing failed.")
+        raise RuntimeError(f"Docker daemon unavailable and unsandboxed mode is disabled: {ex}")
 
     container_name = f"openclaw-agent-{agent_id}"
 
@@ -63,13 +68,14 @@ def spinup_agent_container(
 
     workspace_dir = prepare_agent_workspace(agent_id, team_name, team_context, agent_name, task_context)
 
-    # Sandbox Configuration Parameters
-    docker_image = config.get("sandboxDockerImage", "alpine:latest")
-    read_only_root = config.get("sandboxDockerReadOnlyRoot", True)
-    cap_drop = config.get("sandboxDockerCapDrop", ["ALL"])
-    network_mode = config.get("sandboxDockerNetwork", "none")
-    mem_limit = config.get("memoryLimit", 268435456)  # 256MB
-    nano_cpus = config.get("cpuLimit", 500000000)      # 0.5 CPU
+    # Sandbox Configuration Parameters from server-controlled defaults
+    sandbox = SERVER_SANDBOX_SETTINGS
+    docker_image = sandbox.sandboxDockerImage
+    read_only_root = sandbox.sandboxDockerReadOnlyRoot
+    cap_drop = sandbox.sandboxDockerCapDrop
+    network_mode = sandbox.sandboxDockerNetwork
+    mem_limit = sandbox.memoryLimit
+    nano_cpus = sandbox.cpuLimit
 
     # Ensure docker image is available
     try:
@@ -78,8 +84,8 @@ def spinup_agent_container(
         try:
             print(f"[Docker] Pulling sandbox image {docker_image}...")
             client.images.pull(docker_image)
-        except Exception:
-            pass
+        except Exception as pull_ex:
+            print(f"[Docker] Warning: Failed to pull sandbox image {docker_image}: {pull_ex}")
 
     try:
         # Launch isolated sandbox container
@@ -102,11 +108,14 @@ def spinup_agent_container(
         print(f"[Docker] Agent container {container_name} created successfully (ID: {container.short_id}).")
         return container.id
     except Exception as ex:
-        print(f"[Docker] Container launch failed ({ex}). Using Local Sandboxed Workspace.")
-        return f"local-agent-{agent_id}"
+        if settings.ALLOW_UNSANDBOXED_DEV_MODE:
+            print(f"[Docker] Container launch failed ({ex}). ALLOW_UNSANDBOXED_DEV_MODE is enabled — using Local Sandboxed Workspace.")
+            return f"local-dev-agent-{agent_id}"
+        print(f"[Docker] Container launch failed ({ex}). Sandboxing failed.")
+        raise RuntimeError(f"Container launch failed: {ex}")
 
 def stop_agent_container(container_id: str):
-    if not container_id or container_id.startswith("local-agent-"):
+    if not container_id or container_id.startswith("local-agent-") or container_id.startswith("local-dev-agent-"):
         return
     try:
         client = get_docker_client()
@@ -118,7 +127,7 @@ def stop_agent_container(container_id: str):
         print(f"[Docker] Warning stopping container {container_id}: {e}")
 
 def exec_container_command(container_id: str, cmd: str) -> str:
-    if not container_id or container_id.startswith("local-agent-"):
+    if not container_id or container_id.startswith("local-agent-") or container_id.startswith("local-dev-agent-"):
         return "Executed in Local Workspace."
     try:
         client = get_docker_client()

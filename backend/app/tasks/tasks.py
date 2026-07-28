@@ -56,14 +56,18 @@ def spinup_agent_task(agent_id: str):
             )
 
             workspace_path = os.path.join(settings.WORKSPACES_ROOT, str(agent_id))
+            is_dev_mode = container_id.startswith("local-dev-agent-")
+            status_text = "unsandboxed (dev mode)" if is_dev_mode else "running"
+            event_text = "Agent is running (unsandboxed dev mode)" if is_dev_mode else "Agent is running inside sandbox"
 
             conn.execute(
                 text("""
                     UPDATE agents 
-                    SET status = 'running', container_id = :container_id, workspace_path = :workspace_path, started_at = :now
+                    SET status = :status, container_id = :container_id, workspace_path = :workspace_path, started_at = :now
                     WHERE id = :agent_id
                 """),
                 {
+                    "status": status_text,
                     "container_id": container_id,
                     "workspace_path": workspace_path,
                     "now": datetime.now(timezone.utc),
@@ -75,13 +79,13 @@ def spinup_agent_task(agent_id: str):
                 text("INSERT INTO agent_runs (agent_id, event_type, payload) VALUES (:agent_id, 'status_change', :payload)"),
                 {
                     "agent_id": agent_id,
-                    "payload": json.dumps({"status": "running", "text": "Sandbox container is online and active"})
+                    "payload": json.dumps({"status": status_text, "text": event_text})
                 }
             )
             conn.commit()
 
-            publish_agent_event(agent_id, "status_change", {"status": "running", "text": "Agent is running inside sandbox"})
-            print(f"[Celery] Agent {agent_id} successfully spun up in container {container_id[:12]}")
+            publish_agent_event(agent_id, "status_change", {"status": status_text, "text": event_text})
+            print(f"[Celery] Agent {agent_id} successfully spun up ({status_text}, ID: {container_id[:12]})")
 
         except Exception as e:
             print(f"[Celery] Error spinning up agent {agent_id}: {e}")
@@ -93,11 +97,11 @@ def spinup_agent_task(agent_id: str):
                 text("INSERT INTO agent_runs (agent_id, event_type, payload) VALUES (:agent_id, 'error', :payload)"),
                 {
                     "agent_id": agent_id,
-                    "payload": json.dumps({"status": "failed", "error": str(e)})
+                    "payload": json.dumps({"status": "failed", "error": f"Sandboxing failed: {e}"})
                 }
             )
             conn.commit()
-            publish_agent_event(agent_id, "status_change", {"status": "failed", "error": str(e)})
+            publish_agent_event(agent_id, "status_change", {"status": "failed", "error": f"Sandboxing failed: {e}"})
 
 @celery_app.task
 def stop_agent_task(agent_id: str):
@@ -193,7 +197,7 @@ def extract_document_task(document_id: str):
                 conn.execute(
                     text("""
                         INSERT INTO document_chunks (document_id, chunk_index, content, embedding)
-                        VALUES (:doc_id, :idx, :content, :emb::vector)
+                        VALUES (:doc_id, :idx, :content, CAST(:emb AS vector))
                     """),
                     {
                         "doc_id": document_id,
@@ -250,10 +254,10 @@ def process_message_task(agent_id: str, message_id: str):
         chunks_res = conn.execute(
             text("""
                 SELECT c.content, d.filename, c.embedding
-                FROM agent_documents ad
-                JOIN documents d ON ad.document_id = d.id
+                FROM documents d
                 JOIN document_chunks c ON c.document_id = d.id
-                WHERE ad.agent_id = :agent_id AND d.team_id = :team_id
+                LEFT JOIN agent_documents ad ON ad.document_id = d.id AND ad.agent_id = :agent_id
+                WHERE (ad.agent_id = :agent_id OR d.team_id = :team_id)
             """),
             {"agent_id": agent_id, "team_id": agent["team_id"]}
         ).fetchall()

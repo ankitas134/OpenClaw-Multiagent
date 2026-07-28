@@ -12,12 +12,14 @@ from app.tasks.tasks import spinup_agent_task, stop_agent_task, process_message_
 
 router = APIRouter(prefix="/api/agents", tags=["Agents"])
 
+from app.core.sandbox_config import SERVER_SANDBOX_SETTINGS, AgentCustomConfigSchema
+
 class AgentCreateSchema(BaseModel):
     teamId: str
     name: str
     taskContext: Optional[str] = ""
     visibility: Optional[str] = "personal"
-    config: Optional[Dict[str, Any]] = None
+    config: Optional[AgentCustomConfigSchema] = None
     documentIds: Optional[List[str]] = []
 
 class PostMessageSchema(BaseModel):
@@ -70,23 +72,16 @@ async def create_agent(
     t_uuid = uuid.UUID(data.teamId)
     await verify_team_membership(t_uuid, current_user.id, "member", db)
 
-    default_config = {
-        "sandboxMode": "all",
-        "sandboxBackend": "docker",
-        "sandboxDockerNetwork": "none",
-        "sandboxDockerReadOnlyRoot": True,
-        "sandboxDockerCapDrop": ["ALL"],
-        "memoryLimit": 268435456,
-        "cpuLimit": 500000000
-    }
+    # Server-controlled sandbox parameters are fixed and non-overridable by clients
+    agent_config = SERVER_SANDBOX_SETTINGS.model_dump()
     if data.config:
-        default_config.update(data.config)
+        agent_config.update(data.config.model_dump(exclude_none=True))
 
     agent = Agent(
         team_id=t_uuid,
         created_by=current_user.id,
         name=data.name,
-        config=default_config,
+        config=agent_config,
         status="pending",
         task_context=data.taskContext or "",
         visibility=data.visibility or "personal"
@@ -228,7 +223,7 @@ async def get_agent_messages(
     if threadId:
         stmt = stmt.where(AgentMessage.thread_id == threadId)
 
-    stmt = stmt.order_by(AgentMessage.created_at.asc())
+    stmt = stmt.order_by(AgentMessage.created_at.asc(), AgentMessage.id.asc())
     res = await db.execute(stmt)
     msgs = res.scalars().all()
     return [{

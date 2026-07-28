@@ -3,7 +3,7 @@ import requests
 import json
 import uuid
 
-BASE_URL = "http://localhost:8000"
+BASE_URL = "http://127.0.0.1:8000"
 
 def log_step(title, success=True, detail=""):
     status = "SUCCESS" if success else "FAILED"

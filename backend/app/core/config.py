@@ -31,9 +31,12 @@ class Settings(BaseSettings):
 
     # LLM Settings
     LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "groq")
-    GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "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")
+    GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
     GROQ_MODEL: str = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
     TGI_ENDPOINT_URL: str = os.getenv("TGI_ENDPOINT_URL", "http://localhost:8080/v1/chat/completions")
+
+    # Security & Sandboxing
+    ALLOW_UNSANDBOXED_DEV_MODE: bool = os.getenv("ALLOW_UNSANDBOXED_DEV_MODE", "false").lower() == "true"
 
     # Workspace Root
     WORKSPACES_ROOT: str = os.getenv("AGENT_WORKSPACES_ROOT", os.path.abspath(os.path.join(os.getcwd(), "workspaces")))
