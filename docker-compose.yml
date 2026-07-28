@@ -1,0 +1,107 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: openclaw-python-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres_password}
+      POSTGRES_DB: ${DB_NAME:-openclaw_platform}
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - openclaw-net
+
+  redis:
+    image: redis:alpine
+    container_name: openclaw-python-redis
+    restart: always
+    ports:
+      - "6379:6379"
+    networks:
+      - openclaw-net
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: openclaw-python-backend
+    restart: always
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=${DB_USER:-postgres}
+      - DB_PASSWORD=${DB_PASSWORD:-postgres_password}
+      - DB_NAME=${DB_NAME:-openclaw_platform}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - LLM_PROVIDER=${LLM_PROVIDER:-groq}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - GROQ_MODEL=${GROQ_MODEL:-llama-3.3-70b-versatile}
+    ports:
+      - "8000:8000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./workspaces:/app/workspaces
+      - ./data:/app/data
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - openclaw-net
+
+  celery_worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: openclaw-python-worker
+    restart: always
+    command: celery -A app.tasks.celery_app worker --loglevel=info
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=${DB_USER:-postgres}
+      - DB_PASSWORD=${DB_PASSWORD:-postgres_password}
+      - DB_NAME=${DB_NAME:-openclaw_platform}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - LLM_PROVIDER=${LLM_PROVIDER:-groq}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - GROQ_MODEL=${GROQ_MODEL:-llama-3.3-70b-versatile}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./workspaces:/app/workspaces
+      - ./data:/app/data
+    depends_on:
+      - backend
+      - redis
+      - postgres
+    networks:
+      - openclaw-net
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: openclaw-python-frontend
+    restart: always
+    environment:
+      - API_BASE_URL=http://backend:8000
+    ports:
+      - "8501:8501"
+    depends_on:
+      - backend
+    networks:
+      - openclaw-net
+
+volumes:
+  postgres_data:
+
+networks:
+  openclaw-net:
+    driver: bridge
