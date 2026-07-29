@@ -2,7 +2,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
-from app.api import auth, teams, agents, documents, audit, ws, context_assistant
+from app.api import auth, teams, agents, documents, audit, ws, context_assistant, voice
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -25,6 +25,7 @@ app.include_router(documents.router)
 app.include_router(audit.router)
 app.include_router(ws.router)
 app.include_router(context_assistant.router)
+app.include_router(voice.router)
 
 @app.get("/")
 async def root():

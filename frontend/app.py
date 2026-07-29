@@ -18,147 +18,169 @@ st.set_page_config(
 # Inject High-Contrast CSS Theme
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
 
     html, body, [class*="css"] {
         font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
     }
 
-    /* Force App Dark Background */
+    /* Modern Dark Canvas with Mesh Gradient */
     .stApp {
-        background: #0f172a !important;
+        background: radial-gradient(circle at 50% 0%, #1e1b4b 0%, #0f172a 45%, #090d16 100%) !important;
         color: #f8fafc !important;
     }
 
-    /* Sidebar Styling & High Contrast Colors */
+    /* Glassmorphic Sidebar */
     [data-testid="stSidebar"] {
-        background-color: #1e293b !important;
-        border-right: 1px solid rgba(255, 255, 255, 0.1) !important;
+        background: rgba(15, 23, 42, 0.85) !important;
+        backdrop-filter: blur(16px) !important;
+        border-right: 1px solid rgba(255, 255, 255, 0.08) !important;
     }
 
     [data-testid="stSidebar"] * {
         color: #f8fafc !important;
     }
 
-    /* Navigation Tabs High Contrast */
+    /* Sleek Navigation Tabs */
     .stTabs [data-baseweb="tab-list"] {
-        gap: 8px !important;
-        background-color: #1e293b !important;
-        padding: 8px 12px !important;
-        border-radius: 12px !important;
-        border: 1px solid rgba(255, 255, 255, 0.1) !important;
+        gap: 6px !important;
+        background: rgba(30, 41, 59, 0.7) !important;
+        backdrop-filter: blur(12px) !important;
+        padding: 6px 10px !important;
+        border-radius: 16px !important;
+        border: 1px solid rgba(255, 255, 255, 0.08) !important;
     }
 
     .stTabs [data-baseweb="tab"] {
         color: #94a3b8 !important;
         font-weight: 600 !important;
-        font-size: 15px !important;
-        padding: 8px 16px !important;
-        border-radius: 8px !important;
+        font-size: 14px !important;
+        padding: 10px 18px !important;
+        border-radius: 10px !important;
         background: transparent !important;
+        transition: all 0.2s ease !important;
     }
 
     .stTabs [aria-selected="true"] {
         color: #ffffff !important;
-        background-color: #6366f1 !important;
+        background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%) !important;
+        box-shadow: 0 4px 12px rgba(99, 102, 241, 0.35) !important;
     }
 
-    /* Radio Buttons & Text Labels High Contrast */
-    [data-testid="stRadio"] label, [data-testid="stRadio"] p, p, span, label, h1, h2, h3, h4, h5, h6 {
-        color: #f8fafc !important;
-    }
-
-    /* Expanders High Contrast */
-    .stExpander {
-        background-color: #1e293b !important;
-        border: 1px solid rgba(255, 255, 255, 0.12) !important;
+    /* Buttons Styling */
+    .stButton button {
         border-radius: 12px !important;
+        font-weight: 600 !important;
+        transition: all 0.2s ease !important;
     }
 
-    .stExpander * {
+    .stButton button[kind="primary"] {
+        background: linear-gradient(135deg, #6366f1 0%, #4338ca 100%) !important;
+        border: none !important;
+        box-shadow: 0 4px 14px rgba(99, 102, 241, 0.3) !important;
+    }
+
+    .stButton button[kind="primary"]:hover {
+        transform: translateY(-1px) !important;
+        box-shadow: 0 6px 20px rgba(99, 102, 241, 0.45) !important;
+    }
+
+    .stButton button[kind="secondary"] {
+        background: rgba(30, 41, 59, 0.7) !important;
+        border: 1px solid rgba(255, 255, 255, 0.1) !important;
         color: #f8fafc !important;
     }
 
-    /* Chat Messages High Contrast Styling */
+    .stButton button[kind="secondary"]:hover {
+        background: rgba(51, 65, 85, 0.9) !important;
+        border-color: rgba(129, 140, 248, 0.3) !important;
+    }
+
+    /* Chat Messages Premium Bubbles */
     [data-testid="stChatMessage"] {
-        background-color: #1e293b !important;
-        border: 1px solid rgba(255, 255, 255, 0.12) !important;
-        border-radius: 12px !important;
-        padding: 12px 16px !important;
-        margin-bottom: 8px !important;
+        background: rgba(30, 41, 59, 0.75) !important;
+        backdrop-filter: blur(10px) !important;
+        border: 1px solid rgba(255, 255, 255, 0.08) !important;
+        border-radius: 16px !important;
+        padding: 16px 20px !important;
+        margin-bottom: 12px !important;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2) !important;
+    }
+
+    [data-testid="stChatMessage"]:has([aria-label*="user"]), [data-testid="stChatMessage"]:nth-child(odd) {
+        border-left: 3px solid #818cf8 !important;
     }
 
     [data-testid="stChatMessage"] * {
         color: #f8fafc !important;
+        font-size: 15px !important;
+        line-height: 1.6 !important;
     }
 
-    /* Form Inputs High Contrast */
-    .stTextInput input, .stTextArea textarea, .stSelectbox select, div[data-baseweb="select"] > div {
-        background-color: #1e293b !important;
+    /* Expanders & Forms */
+    .stExpander {
+        background: rgba(30, 41, 59, 0.6) !important;
+        backdrop-filter: blur(12px) !important;
+        border: 1px solid rgba(255, 255, 255, 0.08) !important;
+        border-radius: 16px !important;
+        overflow: hidden !important;
+    }
+
+    /* Input Fields */
+    .stTextInput input, .stTextArea textarea, div[data-baseweb="select"] > div {
+        background: rgba(15, 23, 42, 0.8) !important;
         color: #ffffff !important;
-        border: 1px solid rgba(255, 255, 255, 0.2) !important;
-        border-radius: 8px !important;
+        border: 1px solid rgba(255, 255, 255, 0.12) !important;
+        border-radius: 10px !important;
     }
 
-    .stTextInput input::placeholder, .stTextArea textarea::placeholder {
-        color: #94a3b8 !important;
-    }
-
-    /* Card Containers */
-    .claw-card {
-        background: #1e293b;
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        border-radius: 16px;
-        padding: 24px;
-        margin-bottom: 20px;
+    .stTextInput input:focus, .stTextArea textarea:focus {
+        border-color: #818cf8 !important;
+        box-shadow: 0 0 10px rgba(129, 140, 248, 0.25) !important;
     }
 
     /* Header Banner */
     .claw-header {
-        background: linear-gradient(90deg, #4f46e5 0%, #7c3aed 50%, #2563eb 100%);
-        border-radius: 14px;
-        padding: 18px 24px;
-        margin-bottom: 20px;
+        background: linear-gradient(135deg, #3730a3 0%, #5b21b6 50%, #1e40af 100%);
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+        border-radius: 18px;
+        padding: 20px 28px;
+        margin-bottom: 24px;
         display: flex;
         align-items: center;
         justify-content: space-between;
     }
 
-    .claw-header h2 {
-        color: #ffffff !important;
-        margin: 0 !important;
-        font-weight: 700 !important;
-    }
-
     /* Status Badges */
     .badge-running {
-        background-color: #10b981;
+        background: linear-gradient(135deg, #059669 0%, #10b981 100%);
         color: #ffffff !important;
-        padding: 4px 14px;
+        padding: 5px 16px;
         border-radius: 20px;
         font-size: 13px;
         font-weight: 700;
-        display: inline-block;
+        letter-spacing: 0.5px;
+        box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);
     }
 
     .badge-pending {
-        background-color: #f59e0b;
+        background: linear-gradient(135deg, #d97706 0%, #f59e0b 100%);
         color: #ffffff !important;
-        padding: 4px 14px;
+        padding: 5px 16px;
         border-radius: 20px;
         font-size: 13px;
         font-weight: 700;
-        display: inline-block;
+        box-shadow: 0 2px 8px rgba(245, 158, 11, 0.3);
     }
 
     .badge-stopped {
-        background-color: #64748b;
+        background: linear-gradient(135deg, #475569 0%, #64748b 100%);
         color: #ffffff !important;
-        padding: 4px 14px;
+        padding: 5px 16px;
         border-radius: 20px;
         font-size: 13px;
         font-weight: 700;
-        display: inline-block;
     }
 
     /* Hide Streamlit Chrome */
@@ -311,6 +333,53 @@ with st.sidebar:
             index=0
         )
         st.session_state["current_team"] = team_options[selected_team_name]
+        
+        # Sidebar Chat History List (ChatGPT Style)
+        t_id = st.session_state["current_team"]["teamId"]
+        sb_agents_res = requests.get(f"{API_BASE}/api/agents?teamId={t_id}", headers=get_headers())
+        sb_agents = sb_agents_res.json() if sb_agents_res.status_code == 200 else []
+        
+        if sb_agents:
+            st.markdown("---")
+            st.markdown("### 💬 Chat Conversations")
+            
+            # Target agent selector in sidebar if multiple agents
+            sb_agent_names = {a["name"]: a["id"] for a in sb_agents}
+            
+            # Sync default index with session_state
+            cur_agent_id = st.session_state.get("selected_agent_id", sb_agents[0]["id"])
+            cur_sb_index = 0
+            for idx, (aname, aid) in enumerate(sb_agent_names.items()):
+                if aid == cur_agent_id:
+                    cur_sb_index = idx
+                    break
+
+            sb_selected_agent_name = st.selectbox("Active Agent", options=list(sb_agent_names.keys()), index=cur_sb_index, key="sb_active_agent_sel")
+            sb_agent_id = sb_agent_names[sb_selected_agent_name]
+            st.session_state["selected_agent_id"] = sb_agent_id
+            
+            # New Chat Button
+            if st.button("➕ New Conversation", key="sb_new_chat_btn", use_container_width=True, type="primary"):
+                new_th = f"thread_{int(time.time())}"
+                st.session_state[f"active_thread_{sb_agent_id}"] = new_th
+                st.rerun()
+
+            # List existing threads in sidebar
+            threads_res = requests.get(f"{API_BASE}/api/agents/{sb_agent_id}/threads", headers=get_headers())
+            sb_threads = threads_res.json() if threads_res.status_code == 200 else []
+            if "main" not in sb_threads:
+                sb_threads.insert(0, "main")
+
+            active_th = st.session_state.get(f"active_thread_{sb_agent_id}", sb_threads[0])
+            st.session_state[f"active_thread_{sb_agent_id}"] = active_th
+            
+            for th in sb_threads[:8]:
+                label = "💬 Main Conversation" if th == "main" else f"💬 {th.replace('thread_', 'Chat #')}"
+                is_active = (th == active_th)
+                btn_type = "primary" if is_active else "secondary"
+                if st.button(label, key=f"sb_th_{th}_{sb_agent_id}", use_container_width=True, type=btn_type):
+                    st.session_state[f"active_thread_{sb_agent_id}"] = th
+                    st.rerun()
     else:
         st.warning("No active team found.")
 
@@ -337,7 +406,7 @@ st.markdown(f"""
     </div>
     <div>
         <span style='background: rgba(255,255,255,0.2); color: white; padding: 6px 14px; border-radius: 20px; font-size: 13px; font-weight: 700;'>
-            ⚡ Groq Llama-3.3 Engine
+            ⚡ Groq Llama-3.3 Engine & Whisper Voice STT
         </span>
     </div>
 </div>
@@ -348,7 +417,7 @@ tab_agents, tab_docs, tab_team, tab_assistant, tab_audit = st.tabs([
     "🤖 Agent Hub", 
     "📁 Document Library", 
     "👥 Team Guidelines", 
-    "✨ Context Assistant",
+    "✨ Context Assistant", 
     "📜 Audit Logs"
 ])
 
@@ -403,8 +472,16 @@ with tab_agents:
                 status_icon = "🟢" if a['status'] == 'running' else ("🟡" if a['status'] == 'pending' else "⚪")
                 agent_map[f"{status_icon} {a['name']} ({a['status']})"] = a["id"]
             
-            selected_agent_label = st.radio("Select Agent to Manage", options=list(agent_map.keys()))
+            default_id = st.session_state.get("selected_agent_id", agents_list[0]["id"])
+            default_index = 0
+            for idx, (lbl, aid) in enumerate(agent_map.items()):
+                if aid == default_id:
+                    default_index = idx
+                    break
+
+            selected_agent_label = st.radio("Select Agent to Manage", options=list(agent_map.keys()), index=default_index, key="hub_agent_radio")
             selected_agent_id = agent_map[selected_agent_label]
+            st.session_state["selected_agent_id"] = selected_agent_id
 
     with col_detail:
         if selected_agent_id:
@@ -463,22 +540,25 @@ with tab_agents:
                     existing_threads.insert(0, "main")
 
                 th_key = f"active_thread_{selected_agent_id}"
-                if th_key in st.session_state and st.session_state[th_key] not in existing_threads:
-                    existing_threads.append(st.session_state[th_key])
+                active_th_val = st.session_state.get(th_key, "main")
+                if active_th_val not in existing_threads:
+                    existing_threads.append(active_th_val)
+                th_idx = existing_threads.index(active_th_val) if active_th_val in existing_threads else 0
 
                 col_th1, col_th2 = st.columns([3, 1])
                 with col_th1:
                     selected_thread = st.selectbox(
                         "Active Thread",
                         options=existing_threads,
-                        key=f"thread_sel_{selected_agent_id}"
+                        index=th_idx,
+                        key=f"thread_sel_box_{selected_agent_id}"
                     )
+                    st.session_state[th_key] = selected_thread
                 with col_th2:
                     st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
                     if st.button("➕ New Thread", key=f"new_th_{selected_agent_id}", use_container_width=True):
                         new_th_name = f"thread_{int(time.time())}"
                         st.session_state[th_key] = new_th_name
-                        st.session_state[f"thread_sel_{selected_agent_id}"] = new_th_name
                         st.rerun()
 
                 active_thread_id = selected_thread
@@ -495,6 +575,53 @@ with tab_agents:
                             avatar = "👤" if m["sender"] == "user" else "🤖"
                             with st.chat_message(m["sender"], avatar=avatar):
                                 st.write(m["text"])
+
+                # Live Voice-to-Text Speech Input Widget
+                with st.expander("🎤 Live Microphone Speech Input (Groq Whisper STT)", expanded=True):
+                    st.caption("Click the red microphone button below to record your voice live. Click again to stop.")
+                    
+                    audio_bytes = None
+                    try:
+                        from audio_recorder_streamlit import audio_recorder
+                        audio_bytes = audio_recorder(text="Click to Record Live Voice", recording_color="#ef4444", neutral_color="#6366f1", icon_name="microphone", icon_size="2x")
+                    except Exception:
+                        if hasattr(st, "audio_input"):
+                            rec = st.audio_input("Record Live Voice")
+                            if rec:
+                                audio_bytes = rec.getvalue()
+
+                    if audio_bytes:
+                        if st.button("🗣️ Transcribe & Send Live Voice Message", type="primary", use_container_width=True, key=f"send_voice_{selected_agent_id}"):
+                            with st.spinner("Transcribing your live speech via Groq Whisper..."):
+                                try:
+                                    files = {"file": ("recording.wav", audio_bytes, "audio/wav")}
+                                    tr_res = requests.post(f"{API_BASE}/api/voice/transcribe", files=files, headers=get_headers())
+                                    if tr_res.status_code == 200:
+                                        transcribed_text = tr_res.json().get("text", "")
+                                        st.success(f"Recognized Speech: '{transcribed_text}'")
+                                        
+                                        # Send transcribed text as message
+                                        post_res = requests.post(
+                                            f"{API_BASE}/api/agents/{selected_agent_id}/messages",
+                                            json={"text": transcribed_text, "threadId": active_thread_id},
+                                            headers=get_headers()
+                                        )
+                                        if post_res.status_code in [200, 201, 202]:
+                                            # Poll for LLM response
+                                            start_time = time.time()
+                                            initial_count = len(messages)
+                                            while time.time() - start_time < 6.0:
+                                                time.sleep(0.5)
+                                                poll_res = requests.get(f"{API_BASE}/api/agents/{selected_agent_id}/messages?threadId={active_thread_id}", headers=get_headers())
+                                                if poll_res.status_code == 200:
+                                                    current_msgs = poll_res.json()
+                                                    if len(current_msgs) > initial_count + 1 or (current_msgs and current_msgs[-1]["sender"] == "agent"):
+                                                        break
+                                            st.rerun()
+                                    else:
+                                        st.error(parse_response_error(tr_res, "Speech transcription failed."))
+                                except Exception as ex:
+                                    st.error(f"Voice transcription error: {ex}")
 
                 if prompt := st.chat_input("Ask a question or issue a command..."):
                     post_res = requests.post(
