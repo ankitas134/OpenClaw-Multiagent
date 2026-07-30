@@ -10,7 +10,7 @@ API_BASE = os.getenv("API_BASE_URL", "http://localhost:8000")
 # -----------------------------------------------------------------------------
 st.set_page_config(
     page_title="OpenClaw Platform - AI Agent Portal",
-    page_icon="🤖",
+    page_icon=None,
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -243,12 +243,12 @@ if not st.session_state["token"]:
     with col_b:
         st.markdown("""
         <div style='text-align: center; margin-bottom: 24px;'>
-            <h1 style='font-size: 38px; font-weight: 800; color: #818cf8;'>🤖 OpenClaw</h1>
+            <h1 style='font-size: 38px; font-weight: 800; color: #818cf8;'>OpenClaw</h1>
             <p style='color: #cbd5e1; font-size: 15px; margin-top: 4px;'>Enterprise AI Agent Orchestration & RAG Platform</p>
         </div>
         """, unsafe_allow_html=True)
 
-        auth_tab1, auth_tab2 = st.tabs(["🔐 Sign In", "📝 Register Account"])
+        auth_tab1, auth_tab2 = st.tabs(["Sign In", "Register Account"])
 
         with auth_tab1:
             st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
@@ -313,7 +313,7 @@ teams = user.get("teams", [])
 with st.sidebar:
     st.markdown("""
     <div style='display: flex; align-items: center; gap: 12px; margin-bottom: 16px;'>
-        <div style='font-size: 32px;'>🤖</div>
+        <div style='font-size: 24px; font-weight: 800; color: #818cf8;'>[OC]</div>
         <div>
             <h3 style='margin:0; font-weight: 800; color: #ffffff;'>OpenClaw</h3>
             <span style='color: #818cf8; font-size: 13px; font-weight: 600;'>Python Platform</span>
@@ -321,8 +321,8 @@ with st.sidebar:
     </div>
     """, unsafe_allow_html=True)
 
-    st.markdown(f"👤 **{user['name']}**")
-    st.markdown(f"📧 `{user['email']}`")
+    st.markdown(f"**{user['name']}**")
+    st.markdown(f"`{user['email']}`")
     st.divider()
 
     if teams:
@@ -341,7 +341,7 @@ with st.sidebar:
         
         if sb_agents:
             st.markdown("---")
-            st.markdown("### 💬 Chat Conversations")
+            st.markdown("### Chat Conversations")
             
             # Target agent selector in sidebar if multiple agents
             sb_agent_names = {a["name"]: a["id"] for a in sb_agents}
@@ -359,7 +359,7 @@ with st.sidebar:
             st.session_state["selected_agent_id"] = sb_agent_id
             
             # New Chat Button
-            if st.button("➕ New Conversation", key="sb_new_chat_btn", use_container_width=True, type="primary"):
+            if st.button("+ New Conversation", key="sb_new_chat_btn", use_container_width=True, type="primary"):
                 new_th = f"thread_{int(time.time())}"
                 st.session_state[f"active_thread_{sb_agent_id}"] = new_th
                 st.rerun()
@@ -370,22 +370,32 @@ with st.sidebar:
             if "main" not in sb_threads:
                 sb_threads.insert(0, "main")
 
-            active_th = st.session_state.get(f"active_thread_{sb_agent_id}", sb_threads[0])
+            active_th = st.session_state.get(f"active_thread_{sb_agent_id}", "main")
+            if active_th not in sb_threads:
+                sb_threads.insert(1, active_th)
             st.session_state[f"active_thread_{sb_agent_id}"] = active_th
             
-            for th in sb_threads[:8]:
-                label = "💬 Main Conversation" if th == "main" else f"💬 {th.replace('thread_', 'Chat #')}"
-                is_active = (th == active_th)
-                btn_type = "primary" if is_active else "secondary"
-                if st.button(label, key=f"sb_th_{th}_{sb_agent_id}", use_container_width=True, type=btn_type):
-                    st.session_state[f"active_thread_{sb_agent_id}"] = th
-                    st.rerun()
+            for th in sb_threads[:10]:
+                col_th_btn, col_del_btn = st.columns([3.8, 1.2])
+                with col_th_btn:
+                    label = "Main" if th == "main" else f"{th.replace('thread_', 'Chat #')}"
+                    is_active = (th == active_th)
+                    btn_type = "primary" if is_active else "secondary"
+                    if st.button(label, key=f"sb_th_{th}_{sb_agent_id}", use_container_width=True, type=btn_type):
+                        st.session_state[f"active_thread_{sb_agent_id}"] = th
+                        st.rerun()
+                with col_del_btn:
+                    if st.button("Delete", key=f"del_th_{th}_{sb_agent_id}", help="Delete Chat Thread"):
+                        requests.delete(f"{API_BASE}/api/agents/{sb_agent_id}/threads/{th}", headers=get_headers())
+                        if st.session_state.get(f"active_thread_{sb_agent_id}") == th:
+                            st.session_state[f"active_thread_{sb_agent_id}"] = "main"
+                        st.rerun()
     else:
         st.warning("No active team found.")
 
     st.divider()
 
-    if st.button("🚪 Sign Out", type="secondary", use_container_width=True):
+    if st.button("Sign Out", type="secondary", use_container_width=True):
         st.session_state.clear()
         st.query_params.clear()
         st.rerun()
@@ -401,12 +411,12 @@ team_id = current_team["teamId"]
 st.markdown(f"""
 <div class='claw-header'>
     <div>
-        <h2>🏢 Team Workspace: {current_team['name']}</h2>
+        <h2>Team Workspace: {current_team['name']}</h2>
         <span style='color: #e0e7ff; font-size: 14px;'>Role: <b>{current_team.get('role', 'owner').upper()}</b> | Execution Mode: <b>Docker Sandboxed</b></span>
     </div>
     <div>
         <span style='background: rgba(255,255,255,0.2); color: white; padding: 6px 14px; border-radius: 20px; font-size: 13px; font-weight: 700;'>
-            ⚡ Groq Llama-3.3 Engine & Whisper Voice STT
+            Groq Llama-3.3 Engine & Whisper Voice STT
         </span>
     </div>
 </div>
@@ -414,11 +424,11 @@ st.markdown(f"""
 
 # Main Navigation Tabs
 tab_agents, tab_docs, tab_team, tab_assistant, tab_audit = st.tabs([
-    "🤖 Agent Hub", 
-    "📁 Document Library", 
-    "👥 Team Guidelines", 
-    "✨ Context Assistant", 
-    "📜 Audit Logs"
+    "Agent Hub", 
+    "Document Library", 
+    "Team Guidelines", 
+    "Context Assistant", 
+    "Audit Logs"
 ])
 
 # -----------------------------------------------------------------------------
@@ -430,7 +440,7 @@ with tab_agents:
     with col_list:
         st.subheader("Your Team Agents")
 
-        with st.expander("➕ Create New Agent", expanded=False):
+        with st.expander("+ Create New Agent", expanded=False):
             with st.form("create_agent_form"):
                 new_agent_name = st.text_input("Agent Name", placeholder="e.g. Finance Assistant")
                 new_agent_task = st.text_area("Task Context / Goal", placeholder="Summarize financial reports.", height=80)
@@ -441,7 +451,7 @@ with tab_agents:
                 doc_map = {d["filename"]: d["id"] for d in available_docs}
                 selected_doc_names = st.multiselect("Attach Reference Documents", options=list(doc_map.keys()))
 
-                submit_create = st.form_submit_button("🚀 Spin Up Agent", use_container_width=True)
+                submit_create = st.form_submit_button("Spin Up Agent", use_container_width=True)
 
                 if submit_create and new_agent_name:
                     selected_doc_ids = [doc_map[name] for name in selected_doc_names]
@@ -464,12 +474,12 @@ with tab_agents:
         agents_list = agents_res.json() if agents_res.status_code == 200 else []
 
         if not agents_list:
-            st.info("No agents created yet. Click '➕ Create New Agent' above!")
+            st.info("No agents created yet. Click '+ Create New Agent' above!")
             selected_agent_id = None
         else:
             agent_map = {}
             for a in agents_list:
-                status_icon = "🟢" if a['status'] == 'running' else ("🟡" if a['status'] == 'pending' else "⚪")
+                status_icon = "[Running]" if a['status'] == 'running' else ("[Pending]" if a['status'] == 'pending' else "[Stopped]")
                 agent_map[f"{status_icon} {a['name']} ({a['status']})"] = a["id"]
             
             default_id = st.session_state.get("selected_agent_id", agents_list[0]["id"])
@@ -493,7 +503,7 @@ with tab_agents:
                 
                 st.markdown(f"""
                 <div style='display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px;'>
-                    <h2 style='margin:0; font-size: 26px; font-weight: 700; color: #ffffff;'>🤖 {agent['name']}</h2>
+                    <h2 style='margin:0; font-size: 26px; font-weight: 700; color: #ffffff;'>{agent['name']}</h2>
                     <div>
                         <span class='{status_class}'>{agent['status'].upper()}</span>
                         <span style='background: rgba(255,255,255,0.12); color: #ffffff; padding: 4px 12px; border-radius: 12px; font-size: 13px; font-weight: 600; margin-left: 8px;'>
@@ -504,7 +514,7 @@ with tab_agents:
                 """, unsafe_allow_html=True)
 
                 # Task Context Brief
-                with st.expander("📄 View Operational Task Brief (MEMORY.md)", expanded=False):
+                with st.expander("View Operational Task Brief (MEMORY.md)", expanded=False):
                     if agent['taskContext']:
                         st.markdown(agent['taskContext'])
                     else:
@@ -513,7 +523,7 @@ with tab_agents:
                 # Sandbox Controls
                 col_btn1, col_btn2 = st.columns(2)
                 with col_btn1:
-                    if st.button("▶ Start Sandbox Container", key="start_btn", use_container_width=True, type="primary"):
+                    if st.button("Start Sandbox Container", key="start_btn", use_container_width=True, type="primary"):
                         st_res = requests.post(f"{API_BASE}/api/agents/{selected_agent_id}/start", headers=get_headers())
                         if st_res.status_code in [200, 202]:
                             st.success("Sandbox container spinup queued!")
@@ -521,7 +531,7 @@ with tab_agents:
                         else:
                             st.error(parse_response_error(st_res, "Failed to start agent."))
                 with col_btn2:
-                    if st.button("⏹ Stop Sandbox Container", key="stop_btn", use_container_width=True):
+                    if st.button("Stop Sandbox Container", key="stop_btn", use_container_width=True):
                         sp_res = requests.post(f"{API_BASE}/api/agents/{selected_agent_id}/stop", headers=get_headers())
                         if sp_res.status_code in [200, 202]:
                             st.warning("Stop signal queued.")
@@ -531,37 +541,20 @@ with tab_agents:
 
                 st.divider()
 
-                # Multi-Thread Chat
-                st.subheader("💬 Interactive Chat Threads")
-                
-                threads_res = requests.get(f"{API_BASE}/api/agents/{selected_agent_id}/threads", headers=get_headers())
-                existing_threads = threads_res.json() if threads_res.status_code == 200 else []
-                if "main" not in existing_threads:
-                    existing_threads.insert(0, "main")
-
+                # Active Chat Thread View (Controlled via Sidebar ChatGPT List)
                 th_key = f"active_thread_{selected_agent_id}"
-                active_th_val = st.session_state.get(th_key, "main")
-                if active_th_val not in existing_threads:
-                    existing_threads.append(active_th_val)
-                th_idx = existing_threads.index(active_th_val) if active_th_val in existing_threads else 0
-
-                col_th1, col_th2 = st.columns([3, 1])
-                with col_th1:
-                    selected_thread = st.selectbox(
-                        "Active Thread",
-                        options=existing_threads,
-                        index=th_idx,
-                        key=f"thread_sel_box_{selected_agent_id}"
-                    )
-                    st.session_state[th_key] = selected_thread
-                with col_th2:
-                    st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
-                    if st.button("➕ New Thread", key=f"new_th_{selected_agent_id}", use_container_width=True):
-                        new_th_name = f"thread_{int(time.time())}"
-                        st.session_state[th_key] = new_th_name
+                active_thread_id = st.session_state.get(th_key, "main")
+                
+                col_head1, col_head2 = st.columns([3.2, 1])
+                with col_head1:
+                    display_th = "Main Conversation" if active_thread_id == "main" else active_thread_id.replace("thread_", "Chat #")
+                    st.subheader(f"Conversation: {display_th}")
+                with col_head2:
+                    st.markdown("<div style='height: 4px;'></div>", unsafe_allow_html=True)
+                    if st.button("Delete Chat", key=f"del_hdr_{selected_agent_id}_{active_thread_id}", type="secondary", use_container_width=True):
+                        requests.delete(f"{API_BASE}/api/agents/{selected_agent_id}/threads/{active_thread_id}", headers=get_headers())
+                        st.session_state[th_key] = "main"
                         st.rerun()
-
-                active_thread_id = selected_thread
 
                 msgs_res = requests.get(f"{API_BASE}/api/agents/{selected_agent_id}/messages?threadId={active_thread_id}", headers=get_headers())
                 messages = msgs_res.json() if msgs_res.status_code == 200 else []
@@ -569,55 +562,59 @@ with tab_agents:
                 chat_container = st.container(height=320)
                 with chat_container:
                     if not messages:
-                        st.info("👋 Send a message below to start chatting with this agent!")
+                        st.info("Send a message below to start chatting with this agent.")
                     else:
                         for m in messages:
-                            avatar = "👤" if m["sender"] == "user" else "🤖"
+                            avatar = "User" if m["sender"] == "user" else "Agent"
                             with st.chat_message(m["sender"], avatar=avatar):
                                 st.write(m["text"])
 
                 # Live Voice-to-Text Speech Input Widget
-                with st.expander("🎤 Live Microphone Speech Input (Groq Whisper STT)", expanded=True):
-                    st.caption("Click the red microphone button below to record your voice live. Click again to stop.")
+                with st.expander("Live Microphone Speech Input (Groq Whisper STT)", expanded=True):
+                    st.caption("Click the microphone button below to record your voice live, then click Transcribe.")
                     
                     audio_bytes = None
-                    try:
-                        from audio_recorder_streamlit import audio_recorder
-                        audio_bytes = audio_recorder(text="Click to Record Live Voice", recording_color="#ef4444", neutral_color="#6366f1", icon_name="microphone", icon_size="2x")
-                    except Exception:
-                        if hasattr(st, "audio_input"):
-                            rec = st.audio_input("Record Live Voice")
-                            if rec:
-                                audio_bytes = rec.getvalue()
+                    if hasattr(st, "audio_input"):
+                        rec = st.audio_input("Live Microphone Recorder", key=f"audio_input_mic_{selected_agent_id}_{active_thread_id}")
+                        if rec:
+                            audio_bytes = rec.getvalue()
+                    else:
+                        try:
+                            from audio_recorder_streamlit import audio_recorder
+                            audio_bytes = audio_recorder(text="Click Mic to Record Voice", recording_color="#ef4444", neutral_color="#6366f1", icon_name="microphone", icon_size="2x")
+                        except Exception:
+                            audio_bytes = None
 
-                    if audio_bytes:
-                        if st.button("🗣️ Transcribe & Send Live Voice Message", type="primary", use_container_width=True, key=f"send_voice_{selected_agent_id}"):
-                            with st.spinner("Transcribing your live speech via Groq Whisper..."):
+                    if audio_bytes and len(audio_bytes) > 2000:
+                        if st.button("Transcribe & Send Live Voice Message", type="primary", use_container_width=True, key=f"send_voice_{selected_agent_id}_{active_thread_id}"):
+                            with st.spinner("Transcribing English speech via Groq Whisper..."):
                                 try:
                                     files = {"file": ("recording.wav", audio_bytes, "audio/wav")}
                                     tr_res = requests.post(f"{API_BASE}/api/voice/transcribe", files=files, headers=get_headers())
                                     if tr_res.status_code == 200:
-                                        transcribed_text = tr_res.json().get("text", "")
-                                        st.success(f"Recognized Speech: '{transcribed_text}'")
-                                        
-                                        # Send transcribed text as message
-                                        post_res = requests.post(
-                                            f"{API_BASE}/api/agents/{selected_agent_id}/messages",
-                                            json={"text": transcribed_text, "threadId": active_thread_id},
-                                            headers=get_headers()
-                                        )
-                                        if post_res.status_code in [200, 201, 202]:
-                                            # Poll for LLM response
-                                            start_time = time.time()
-                                            initial_count = len(messages)
-                                            while time.time() - start_time < 6.0:
-                                                time.sleep(0.5)
-                                                poll_res = requests.get(f"{API_BASE}/api/agents/{selected_agent_id}/messages?threadId={active_thread_id}", headers=get_headers())
-                                                if poll_res.status_code == 200:
-                                                    current_msgs = poll_res.json()
-                                                    if len(current_msgs) > initial_count + 1 or (current_msgs and current_msgs[-1]["sender"] == "agent"):
-                                                        break
-                                            st.rerun()
+                                        transcribed_text = tr_res.json().get("text", "").strip()
+                                        if transcribed_text:
+                                            st.success(f"Recognized Speech: '{transcribed_text}'")
+                                            # Send transcribed text as message
+                                            post_res = requests.post(
+                                                f"{API_BASE}/api/agents/{selected_agent_id}/messages",
+                                                json={"text": transcribed_text, "threadId": active_thread_id},
+                                                headers=get_headers()
+                                            )
+                                            if post_res.status_code in [200, 201, 202]:
+                                                # Poll for LLM response
+                                                start_time = time.time()
+                                                initial_count = len(messages)
+                                                while time.time() - start_time < 6.0:
+                                                    time.sleep(0.5)
+                                                    poll_res = requests.get(f"{API_BASE}/api/agents/{selected_agent_id}/messages?threadId={active_thread_id}", headers=get_headers())
+                                                    if poll_res.status_code == 200:
+                                                        current_msgs = poll_res.json()
+                                                        if len(current_msgs) > initial_count + 1 or (current_msgs and current_msgs[-1]["sender"] == "agent"):
+                                                            break
+                                                st.rerun()
+                                        else:
+                                            st.warning("No speech detected. Please speak clearly into your microphone.")
                                     else:
                                         st.error(parse_response_error(tr_res, "Speech transcription failed."))
                                 except Exception as ex:
@@ -648,7 +645,7 @@ with tab_agents:
 # TAB 2: DOCUMENT LIBRARY
 # -----------------------------------------------------------------------------
 with tab_docs:
-    st.header("📁 Document Knowledge Base")
+    st.header("Document Knowledge Base")
     st.caption("Upload company policies, PDFs, and text files for RAG grounding.")
     
     col_up, col_dlist = st.columns([1, 1.8])
@@ -658,7 +655,7 @@ with tab_docs:
             st.subheader("Upload New File")
             uploaded_file = st.file_uploader("Choose PDF, DOCX, TXT, or MD", type=["pdf", "docx", "txt", "md"])
             doc_vis = st.selectbox("Visibility", ["team", "personal"], key="doc_vis_sel")
-            submit_up = st.form_submit_button("📤 Upload & Process Embeddings", use_container_width=True)
+            submit_up = st.form_submit_button("Upload & Process Embeddings", use_container_width=True)
 
             if submit_up:
                 if uploaded_file:
@@ -682,10 +679,10 @@ with tab_docs:
             st.info("No documents uploaded for this team yet.")
         else:
             for doc in docs_data:
-                with st.expander(f"📄 {doc['filename']}  — Status: `{doc['extractionStatus']}`"):
+                with st.expander(f"{doc['filename']}  — Status: `{doc['extractionStatus']}`"):
                     st.write(f"**Size**: {doc['sizeBytes']} bytes | **Visibility**: `{doc['visibility']}`")
                     st.write(f"**Uploaded**: {doc['createdAt']}")
-                    if st.button("🗑️ Delete Document", key=f"del_{doc['id']}", type="secondary"):
+                    if st.button("Delete Document", key=f"del_{doc['id']}", type="secondary"):
                         del_res = requests.delete(f"{API_BASE}/api/documents/{team_id}/{doc['id']}", headers=get_headers())
                         if del_res.status_code in [200, 204]:
                             st.warning(f"Deleted {doc['filename']}")
@@ -697,16 +694,16 @@ with tab_docs:
 # TAB 3: TEAM GUIDELINES
 # -----------------------------------------------------------------------------
 with tab_team:
-    st.header(f"👥 Standing Team Guidelines ({current_team['name']})")
+    st.header(f"Standing Team Guidelines ({current_team['name']})")
     
     team_detail_res = requests.get(f"{API_BASE}/api/teams/{team_id}", headers=get_headers())
     if team_detail_res.status_code == 200:
         team_data = team_detail_res.json()
         
-        st.info("💡 Standing guidelines defined here are automatically injected into all agents operating under this team.")
+        st.info("Standing guidelines defined here are automatically injected into all agents operating under this team.")
         
         new_context = st.text_area("Standing Team Context Guidelines (Markdown)", value=team_data["contextMd"], height=220)
-        if st.button("💾 Save Standing Guidelines", type="primary"):
+        if st.button("Save Standing Guidelines", type="primary"):
             u_res = requests.patch(f"{API_BASE}/api/teams/{team_id}/context", json={"context_md": new_context}, headers=get_headers())
             if u_res.status_code == 200:
                 st.success("Team guidelines updated successfully!")
@@ -718,7 +715,7 @@ with tab_team:
 # TAB 4: CONTEXT ASSISTANT
 # -----------------------------------------------------------------------------
 with tab_assistant:
-    st.header("✨ Context Brief Assistant")
+    st.header("Context Brief Assistant")
     st.caption("Fill out the intake questionnaire to compile a structured MEMORY.md brief.")
 
     col_ca1, col_ca2 = st.columns([1.2, 1])
@@ -730,7 +727,7 @@ with tab_assistant:
             ca_constraints = st.text_input("3. Implementation Constraints", placeholder="e.g. Strict daily meal cap of $75, no international travel")
             ca_audience = st.text_input("4. Intended Team / Audience", value=current_team["name"])
 
-            submit_ca = st.form_submit_button("✨ Compile Brief (MEMORY.md)", type="primary", use_container_width=True)
+            submit_ca = st.form_submit_button("Compile Brief (MEMORY.md)", type="primary", use_container_width=True)
 
             if submit_ca and ca_goal:
                 ca_payload = {
@@ -754,7 +751,7 @@ with tab_assistant:
                 st.markdown(brief_md)
 
             st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
-            if st.button("📋 Apply as Standing Team Context", use_container_width=True):
+            if st.button("Apply as Standing Team Context", use_container_width=True):
                 u_res = requests.patch(f"{API_BASE}/api/teams/{team_id}/context", json={"context_md": brief_md}, headers=get_headers())
                 if u_res.status_code == 200:
                     st.success("Applied to Team Context Guidelines!")
@@ -767,7 +764,7 @@ with tab_assistant:
             if team_agents:
                 agent_options = {a["name"]: a["id"] for a in team_agents}
                 target_agent_name = st.selectbox("Apply to Agent", options=list(agent_options.keys()), key="ca_target_agent")
-                if st.button("🤖 Apply as Agent Task Context", use_container_width=True):
+                if st.button("Apply as Agent Task Context", use_container_width=True):
                     target_id = agent_options[target_agent_name]
                     a_ctx_res = requests.patch(f"{API_BASE}/api/agents/{target_id}/context", json={"taskContext": brief_md}, headers=get_headers())
                     if a_ctx_res.status_code == 200:
@@ -780,7 +777,7 @@ with tab_assistant:
 # TAB 5: AUDIT LOGS
 # -----------------------------------------------------------------------------
 with tab_audit:
-    st.header(f"📜 Governance Audit Trail ({current_team['name']})")
+    st.header(f"Governance Audit Trail ({current_team['name']})")
     
     audit_res = requests.get(f"{API_BASE}/api/audit-logs?teamId={team_id}", headers=get_headers())
     if audit_res.status_code == 200:

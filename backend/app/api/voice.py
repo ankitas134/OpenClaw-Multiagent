@@ -20,7 +20,11 @@ async def transcribe_audio(
 
     headers = {"Authorization": f"Bearer {settings.GROQ_API_KEY}"}
     files = {"file": (filename, audio_bytes, content_type)}
-    data = {"model": "whisper-large-v3"}
+    data = {
+        "model": "distil-whisper-large-v3-en",
+        "language": "en",
+        "prompt": "English spoken query to an AI assistant."
+    }
 
     try:
         async with httpx.AsyncClient() as client:
@@ -32,10 +36,16 @@ async def transcribe_audio(
                 timeout=30.0
             )
             if res.status_code == 200:
-                return res.json()
+                result = res.json()
+                text = result.get("text", "").strip()
+                # Filter out common Whisper silence hallucinations
+                hallucinations = ["Thank you.", "Thanks for watching!", "Subtitles by", "Obrigado", "De nada", "Amara.org"]
+                if any(h.lower() in text.lower() for h in hallucinations) and len(audio_bytes) < 8000:
+                    return {"text": ""}
+                return result
             
-            # Retry fallback model
-            data["model"] = "distil-whisper-large-v3-en"
+            # Retry fallback model whisper-large-v3 with explicit English constraint
+            data["model"] = "whisper-large-v3"
             res2 = await client.post(
                 "https://api.groq.com/openai/v1/audio/transcriptions",
                 headers=headers,

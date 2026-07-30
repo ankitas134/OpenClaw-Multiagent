@@ -3,16 +3,16 @@ from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import delete
 from sqlalchemy.future import select
 from app.db.session import get_db
 from app.db.models import User, Agent, AgentMessage, Document, agent_documents, AuditLog
 from app.api.auth import get_current_user
 from app.api.teams import verify_team_membership
 from app.tasks.tasks import spinup_agent_task, stop_agent_task, process_message_task
+from app.core.sandbox_config import SERVER_SANDBOX_SETTINGS, AgentCustomConfigSchema
 
 router = APIRouter(prefix="/api/agents", tags=["Agents"])
-
-from app.core.sandbox_config import SERVER_SANDBOX_SETTINGS, AgentCustomConfigSchema
 
 class AgentCreateSchema(BaseModel):
     teamId: str
@@ -43,65 +43,50 @@ async def list_agents(
     t_uuid = uuid.UUID(teamId)
     await verify_team_membership(t_uuid, current_user.id, "member", db)
 
-    res = await db.execute(
-        select(Agent)
-        .where(Agent.team_id == t_uuid)
-        .order_by(Agent.created_at.desc())
-    )
+    res = await db.execute(select(Agent).where(Agent.team_id == t_uuid))
     agents = res.scalars().all()
     return [{
         "id": str(a.id),
         "teamId": str(a.team_id),
-        "createdBy": str(a.created_by) if a.created_by else None,
         "name": a.name,
-        "config": a.config,
         "status": a.status,
         "visibility": a.visibility,
-        "containerId": a.container_id,
         "taskContext": a.task_context,
-        "workspacePath": a.workspace_path,
-        "createdAt": a.created_at.isoformat() if a.created_at else None
+        "createdAt": a.created_at.isoformat()
     } for a in agents]
 
-@router.post("/", status_code=202)
+@router.post("/")
 async def create_agent(
     data: AgentCreateSchema,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     t_uuid = uuid.UUID(data.teamId)
-    await verify_team_membership(t_uuid, current_user.id, "member", db)
+    await verify_team_membership(t_uuid, current_user.id, "admin", db)
 
-    # Server-controlled sandbox parameters are fixed and non-overridable by clients
-    agent_config = SERVER_SANDBOX_SETTINGS.model_dump()
-    if data.config:
-        agent_config.update(data.config.model_dump(exclude_none=True))
+    config_dict = SERVER_SANDBOX_SETTINGS.copy()
 
     agent = Agent(
         team_id=t_uuid,
-        created_by=current_user.id,
         name=data.name,
-        config=agent_config,
-        status="pending",
         task_context=data.taskContext or "",
-        visibility=data.visibility or "personal"
+        visibility=data.visibility or "personal",
+        config=config_dict,
+        status="stopped"
     )
     db.add(agent)
-    await db.flush()
+    await db.commit()
+    await db.refresh(agent)
 
     if data.documentIds:
-        for doc_id in data.documentIds:
-            d_uuid = uuid.UUID(doc_id)
-            doc_res = await db.execute(select(Document).where(Document.id == d_uuid, Document.team_id == t_uuid))
-            doc = doc_res.scalars().first()
-            if doc:
-                await db.execute(agent_documents.insert().values(agent_id=agent.id, document_id=doc.id))
+        for d_id in data.documentIds:
+            doc_uuid = uuid.UUID(d_id)
+            await db.execute(agent_documents.insert().values(agent_id=agent.id, document_id=doc_uuid))
+        await db.commit()
 
     audit = AuditLog(team_id=t_uuid, user_id=current_user.id, action="agent.create", metadata_={"agentId": str(agent.id), "name": agent.name})
     db.add(audit)
     await db.commit()
-
-    spinup_agent_task.delay(str(agent.id))
 
     return {
         "id": str(agent.id),
@@ -109,45 +94,50 @@ async def create_agent(
         "name": agent.name,
         "status": agent.status,
         "visibility": agent.visibility,
-        "taskContext": agent.task_context
+        "taskContext": agent.task_context,
+        "config": agent.config,
+        "createdAt": agent.created_at.isoformat()
     }
 
 @router.get("/{agent_id}")
-async def get_agent_detail(
+async def get_agent(
     agent_id: str,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     a_uuid = uuid.UUID(agent_id)
     agent = await check_agent_access(a_uuid, current_user.id, "member", db)
-
-    doc_res = await db.execute(
-        select(Document)
-        .join(agent_documents, Document.id == agent_documents.c.document_id)
-        .where(agent_documents.c.agent_id == agent.id)
-    )
-    documents = [{
-        "id": str(d.id),
-        "filename": d.filename,
-        "mimeType": d.mime_type,
-        "sizeBytes": d.size_bytes,
-        "extractionStatus": d.extraction_status,
-        "visibility": d.visibility
-    } for d in doc_res.scalars().all()]
-
     return {
         "id": str(agent.id),
         "teamId": str(agent.team_id),
         "name": agent.name,
-        "config": agent.config,
         "status": agent.status,
         "visibility": agent.visibility,
-        "containerId": agent.container_id,
         "taskContext": agent.task_context,
-        "workspacePath": agent.workspace_path,
-        "createdAt": agent.created_at.isoformat() if agent.created_at else None,
-        "documents": documents
+        "config": agent.config,
+        "createdAt": agent.created_at.isoformat(),
+        "startedAt": agent.started_at.isoformat() if agent.started_at else None,
+        "stoppedAt": agent.stopped_at.isoformat() if agent.stopped_at else None
     }
+
+@router.delete("/{agent_id}")
+async def delete_agent(
+    agent_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    a_uuid = uuid.UUID(agent_id)
+    agent = await check_agent_access(a_uuid, current_user.id, "admin", db)
+
+    if agent.status == "running":
+        stop_agent_task.delay(str(agent.id))
+
+    audit = AuditLog(team_id=agent.team_id, user_id=current_user.id, action="agent.delete", metadata_={"agentId": str(agent.id), "name": agent.name})
+    db.add(audit)
+
+    await db.delete(agent)
+    await db.commit()
+    return {"message": f"Agent '{agent.name}' deleted successfully"}
 
 @router.post("/{agent_id}/start")
 async def start_agent(
@@ -158,8 +148,13 @@ async def start_agent(
     a_uuid = uuid.UUID(agent_id)
     agent = await check_agent_access(a_uuid, current_user.id, "member", db)
 
+    agent.status = "pending"
+    audit = AuditLog(team_id=agent.team_id, user_id=current_user.id, action="agent.start", metadata_={"agentId": str(agent.id)})
+    db.add(audit)
+    await db.commit()
+
     spinup_agent_task.delay(str(agent.id))
-    return {"message": "Spinup task queued successfully"}
+    return {"id": str(agent.id), "status": "pending", "message": "Spinup task queued"}
 
 @router.post("/{agent_id}/stop")
 async def stop_agent(
@@ -170,16 +165,21 @@ async def stop_agent(
     a_uuid = uuid.UUID(agent_id)
     agent = await check_agent_access(a_uuid, current_user.id, "member", db)
 
-    stop_agent_task.delay(str(agent.id))
-    return {"message": "Stop task queued successfully"}
+    agent.status = "pending"
+    audit = AuditLog(team_id=agent.team_id, user_id=current_user.id, action="agent.stop", metadata_={"agentId": str(agent.id)})
+    db.add(audit)
+    await db.commit()
 
-class AgentUpdateContextSchema(BaseModel):
+    stop_agent_task.delay(str(agent.id))
+    return {"id": str(agent.id), "status": "pending", "message": "Teardown task queued"}
+
+class ContextUpdateSchema(BaseModel):
     taskContext: str
 
 @router.patch("/{agent_id}/context")
 async def update_agent_context(
     agent_id: str,
-    data: AgentUpdateContextSchema,
+    data: ContextUpdateSchema,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
@@ -235,6 +235,24 @@ async def get_agent_messages(
         "threadId": m.thread_id,
         "createdAt": m.created_at.isoformat() if m.created_at else None
     } for m in msgs]
+
+@router.delete("/{agent_id}/threads/{thread_id}")
+async def delete_agent_thread(
+    agent_id: str,
+    thread_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    a_uuid = uuid.UUID(agent_id)
+    agent = await check_agent_access(a_uuid, current_user.id, "member", db)
+
+    stmt = delete(AgentMessage).where(
+        AgentMessage.agent_id == agent.id,
+        AgentMessage.thread_id == thread_id
+    )
+    await db.execute(stmt)
+    await db.commit()
+    return {"message": f"Thread '{thread_id}' deleted successfully"}
 
 @router.post("/{agent_id}/messages")
 async def post_agent_message(
