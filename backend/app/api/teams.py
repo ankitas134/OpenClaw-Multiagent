@@ -1,4 +1,5 @@
 import uuid
+# pyrefly: ignore [missing-import]
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -69,3 +70,37 @@ async def update_team_context(team_id: str, data: TeamUpdateContextSchema, curre
     await db.commit()
 
     return {"id": str(team.id), "contextMd": team.context_md}
+
+class AddMemberSchema(BaseModel):
+    email: str
+    role: str = "member"
+
+@router.post("/{team_id}/members")
+async def add_team_member(
+    team_id: str,
+    data: AddMemberSchema,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    t_uuid = uuid.UUID(team_id)
+    await verify_team_membership(t_uuid, current_user.id, "admin", db)
+
+    # Find user by email
+    res = await db.execute(select(User).where(User.email == data.email))
+    target_user = res.scalars().first()
+    if not target_user:
+        raise HTTPException(status_code=404, detail=f"User with email '{data.email}' not found. Ask them to register first.")
+
+    # Check if already a member
+    mem_res = await db.execute(select(TeamMember).where(TeamMember.team_id == t_uuid, TeamMember.user_id == target_user.id))
+    if mem_res.scalars().first():
+        return {"message": f"User '{data.email}' is already a member of this team."}
+
+    new_member = TeamMember(team_id=t_uuid, user_id=target_user.id, role=data.role)
+    db.add(new_member)
+    audit = AuditLog(team_id=t_uuid, user_id=current_user.id, action="team.add_member", metadata_={"email": data.email, "role": data.role})
+    db.add(audit)
+    await db.commit()
+
+    return {"message": f"Successfully added '{data.email}' to the team workspace!"}
+

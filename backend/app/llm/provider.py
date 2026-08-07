@@ -6,6 +6,9 @@ class BaseLLMProvider:
     async def generate(self, messages: list[dict], temperature: float = 0.7, max_tokens: int = 1024) -> str:
         raise NotImplementedError
 
+    def generate_sync(self, messages: list[dict], temperature: float = 0.7, max_tokens: int = 1024) -> str:
+        raise NotImplementedError
+
 class GroqLLMProvider(BaseLLMProvider):
     def __init__(self, api_key: str, model: str):
         self.api_key = api_key
@@ -29,6 +32,23 @@ class GroqLLMProvider(BaseLLMProvider):
             data = resp.json()
             return data["choices"][0]["message"]["content"]
 
+    def generate_sync(self, messages: list[dict], temperature: float = 0.7, max_tokens: int = 1024) -> str:
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens
+        }
+        with httpx.Client(timeout=60.0) as client:
+            resp = client.post(self.url, headers=headers, json=payload)
+            resp.raise_for_status()
+            data = resp.json()
+            return data["choices"][0]["message"]["content"]
+
 class TGILLMProvider(BaseLLMProvider):
     def __init__(self, endpoint_url: str):
         self.url = endpoint_url
@@ -41,6 +61,18 @@ class TGILLMProvider(BaseLLMProvider):
         }
         async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.post(self.url, json=payload)
+            resp.raise_for_status()
+            data = resp.json()
+            return data["choices"][0]["message"]["content"]
+
+    def generate_sync(self, messages: list[dict], temperature: float = 0.7, max_tokens: int = 1024) -> str:
+        payload = {
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens
+        }
+        with httpx.Client(timeout=60.0) as client:
+            resp = client.post(self.url, json=payload)
             resp.raise_for_status()
             data = resp.json()
             return data["choices"][0]["message"]["content"]

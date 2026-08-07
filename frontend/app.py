@@ -183,6 +183,46 @@ st.markdown("""
         font-weight: 700;
     }
 
+    .badge-starting {
+        background: linear-gradient(135deg, #0284c7 0%, #0ea5e9 100%);
+        color: #ffffff !important;
+        padding: 5px 16px;
+        border-radius: 20px;
+        font-size: 13px;
+        font-weight: 700;
+        box-shadow: 0 2px 8px rgba(14, 165, 233, 0.3);
+    }
+
+    .badge-stopping {
+        background: linear-gradient(135deg, #b45309 0%, #d97706 100%);
+        color: #ffffff !important;
+        padding: 5px 16px;
+        border-radius: 20px;
+        font-size: 13px;
+        font-weight: 700;
+        box-shadow: 0 2px 8px rgba(217, 119, 6, 0.3);
+    }
+
+    .badge-failed {
+        background: linear-gradient(135deg, #b91c1c 0%, #ef4444 100%);
+        color: #ffffff !important;
+        padding: 5px 16px;
+        border-radius: 20px;
+        font-size: 13px;
+        font-weight: 700;
+        box-shadow: 0 2px 8px rgba(239, 68, 68, 0.3);
+    }
+
+    .badge-devmode {
+        background: linear-gradient(135deg, #7e22ce 0%, #a855f7 100%);
+        color: #ffffff !important;
+        padding: 5px 16px;
+        border-radius: 20px;
+        font-size: 13px;
+        font-weight: 700;
+        box-shadow: 0 2px 8px rgba(168, 85, 247, 0.3);
+    }
+
     /* Hide Streamlit Chrome */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
@@ -212,7 +252,7 @@ if query_token and not st.session_state.get("token"):
                 "name": me_data["name"],
                 "teams": me_data.get("teams", [])
             }
-            if me_data.get("teams"):
+            if me_data.get("teams") and not st.session_state.get("current_team"):
                 st.session_state["current_team"] = me_data["teams"][0]
         else:
             st.query_params.clear()
@@ -231,6 +271,18 @@ def parse_response_error(res, default_msg: str) -> str:
         return data.get("detail", default_msg)
     except Exception:
         return f"{default_msg} (Server returned {res.status_code})"
+
+def get_status_badge_info(status: str):
+    """Maps a raw backend agent status to a (css_class, display_label, short_icon) tuple."""
+    mapping = {
+        "running": ("badge-running", "RUNNING", "[Running]"),
+        "starting": ("badge-starting", "STARTING...", "[Starting]"),
+        "stopping": ("badge-stopping", "STOPPING...", "[Stopping]"),
+        "stopped": ("badge-stopped", "STOPPED", "[Stopped]"),
+        "failed": ("badge-failed", "FAILED", "[Failed]"),
+        "unsandboxed (dev mode)": ("badge-devmode", "DEV MODE", "[Dev Mode]"),
+    }
+    return mapping.get(status, ("badge-stopped", status.upper(), f"[{status.capitalize()}]"))
 
 # -----------------------------------------------------------------------------
 # AUTHENTICATION SCREEN (COMPACT & HIGH CONTRAST)
@@ -273,7 +325,14 @@ if not st.session_state["token"]:
                                 me_data = me_res.json()
                                 st.session_state["user"]["teams"] = me_data["teams"]
                                 if me_data["teams"]:
-                                    st.session_state["current_team"] = me_data["teams"][0]
+                                    # Prefer team with active agents if available
+                                    selected_t = me_data["teams"][0]
+                                    for t in me_data["teams"]:
+                                        ag_res = requests.get(f"{API_BASE}/api/agents?teamId={t['teamId']}", headers={"Authorization": f"Bearer {data['access_token']}"})
+                                        if ag_res.status_code == 200 and len(ag_res.json()) > 0:
+                                            selected_t = t
+                                            break
+                                    st.session_state["current_team"] = selected_t
                             st.success("Successfully logged in!")
                             st.rerun()
                         else:
@@ -325,12 +384,49 @@ with st.sidebar:
     st.markdown(f"`{user['email']}`")
     st.divider()
 
+    # Fetch live team memberships for current user
+    try:
+        me_res = requests.get(f"{API_BASE}/api/auth/me", headers=get_headers())
+        if me_res.status_code == 200:
+            me_data = me_res.json()
+            teams = me_data.get("teams", [])
+            st.session_state["user"]["teams"] = teams
+    except Exception:
+        pass
+
     if teams:
-        team_options = {t["name"]: t for t in teams}
+        team_options = {}
+        for t in teams:
+            role_lbl = t.get('role', 'member').upper()
+            label = f"{t['name']} ({role_lbl} - #{t['teamId'][:4]})"
+            team_options[label] = t
+        
+        # If current_team has 0 agents, auto-switch to team with agents
+        cur_t = st.session_state.get("current_team")
+        if cur_t:
+            ag_check = requests.get(f"{API_BASE}/api/agents?teamId={cur_t['teamId']}", headers=get_headers())
+            if ag_check.status_code == 200 and len(ag_check.json()) == 0:
+                for t in teams:
+                    if t["teamId"] != cur_t["teamId"]:
+                        other_check = requests.get(f"{API_BASE}/api/agents?teamId={t['teamId']}", headers=get_headers())
+                        if other_check.status_code == 200 and len(other_check.json()) > 0:
+                            st.session_state["current_team"] = t
+                            cur_t = t
+                            break
+
+        cur_team_id = st.session_state.get("current_team", {}).get("teamId") if st.session_state.get("current_team") else None
+        cur_t_idx = 0
+        for idx, (tname, tval) in enumerate(team_options.items()):
+            if tval["teamId"] == cur_team_id:
+                cur_t_idx = idx
+                break
+
+        opt_keys = list(team_options.keys())
+
         selected_team_name = st.selectbox(
             "Active Team Workspace",
-            options=list(team_options.keys()),
-            index=0
+            options=opt_keys,
+            index=cur_t_idx
         )
         st.session_state["current_team"] = team_options[selected_team_name]
         
@@ -479,7 +575,7 @@ with tab_agents:
         else:
             agent_map = {}
             for a in agents_list:
-                status_icon = "[Running]" if a['status'] == 'running' else ("[Pending]" if a['status'] == 'pending' else "[Stopped]")
+                _, _, status_icon = get_status_badge_info(a['status'])
                 agent_map[f"{status_icon} {a['name']} ({a['status']})"] = a["id"]
             
             default_id = st.session_state.get("selected_agent_id", agents_list[0]["id"])
@@ -499,13 +595,13 @@ with tab_agents:
             if a_res.status_code == 200:
                 agent = a_res.json()
 
-                status_class = f"badge-{agent['status']}" if agent['status'] in ['running', 'pending', 'stopped'] else "badge-stopped"
+                status_class, status_label, _ = get_status_badge_info(agent['status'])
                 
                 st.markdown(f"""
                 <div style='display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px;'>
                     <h2 style='margin:0; font-size: 26px; font-weight: 700; color: #ffffff;'>{agent['name']}</h2>
                     <div>
-                        <span class='{status_class}'>{agent['status'].upper()}</span>
+                        <span class='{status_class}'>{status_label}</span>
                         <span style='background: rgba(255,255,255,0.12); color: #ffffff; padding: 4px 12px; border-radius: 12px; font-size: 13px; font-weight: 600; margin-left: 8px;'>
                             {agent['visibility'].capitalize()}
                         </span>
@@ -520,8 +616,8 @@ with tab_agents:
                     else:
                         st.caption("No specific task context specified for this agent.")
 
-                # Sandbox Controls
-                col_btn1, col_btn2 = st.columns(2)
+                # Sandbox Controls & Visibility Toggle
+                col_btn1, col_btn2, col_btn3 = st.columns(3)
                 with col_btn1:
                     if st.button("Start Sandbox Container", key="start_btn", use_container_width=True, type="primary"):
                         st_res = requests.post(f"{API_BASE}/api/agents/{selected_agent_id}/start", headers=get_headers())
@@ -538,6 +634,23 @@ with tab_agents:
                             st.rerun()
                         else:
                             st.error(parse_response_error(sp_res, "Failed to stop agent."))
+                with col_btn3:
+                    if agent['visibility'] == 'personal':
+                        if st.button("Share Agent with Team", key="share_team_btn", use_container_width=True):
+                            v_res = requests.patch(f"{API_BASE}/api/agents/{selected_agent_id}/visibility", json={"visibility": "team"}, headers=get_headers())
+                            if v_res.status_code == 200:
+                                st.success("Agent is now shared with team!")
+                                st.rerun()
+                            else:
+                                st.error(parse_response_error(v_res, "Failed to update visibility."))
+                    else:
+                        if st.button("Make Agent Personal (Private)", key="make_priv_btn", use_container_width=True):
+                            v_res = requests.patch(f"{API_BASE}/api/agents/{selected_agent_id}/visibility", json={"visibility": "personal"}, headers=get_headers())
+                            if v_res.status_code == 200:
+                                st.info("Agent is now private to you.")
+                                st.rerun()
+                            else:
+                                st.error(parse_response_error(v_res, "Failed to update visibility."))
 
                 st.divider()
 
@@ -565,8 +678,7 @@ with tab_agents:
                         st.info("Send a message below to start chatting with this agent.")
                     else:
                         for m in messages:
-                            avatar = "User" if m["sender"] == "user" else "Agent"
-                            with st.chat_message(m["sender"], avatar=avatar):
+                            with st.chat_message(m["sender"]):
                                 st.write(m["text"])
 
                 # Live Voice-to-Text Speech Input Widget
@@ -620,23 +732,34 @@ with tab_agents:
                                 except Exception as ex:
                                     st.error(f"Voice transcription error: {ex}")
 
-                if prompt := st.chat_input("Ask a question or issue a command..."):
+                is_agent_running = (agent['status'] == 'running')
+                if not is_agent_running:
+                    st.warning("Agent sandbox container is currently STOPPED. Click 'Start Sandbox Container' above to enable chat execution.")
+
+                chat_placeholder = "Ask a question or issue a command..." if is_agent_running else "Agent sandbox container is STOPPED. Click 'Start Sandbox Container' above to chat."
+                
+                if prompt := st.chat_input(chat_placeholder, disabled=not is_agent_running):
                     post_res = requests.post(
                         f"{API_BASE}/api/agents/{selected_agent_id}/messages",
                         json={"text": prompt, "threadId": active_thread_id},
                         headers=get_headers()
                     )
                     if post_res.status_code in [200, 201, 202]:
-                        # Poll for up to 6 seconds for Celery LLM worker reply to finish
-                        start_time = time.time()
-                        initial_count = len(messages)
-                        while time.time() - start_time < 6.0:
-                            time.sleep(0.5)
-                            poll_res = requests.get(f"{API_BASE}/api/agents/{selected_agent_id}/messages?threadId={active_thread_id}", headers=get_headers())
-                            if poll_res.status_code == 200:
-                                current_msgs = poll_res.json()
-                                if len(current_msgs) > initial_count + 1 or (current_msgs and current_msgs[-1]["sender"] == "agent"):
-                                    break
+                        # Poll for up to 40 seconds for the Celery LLM worker reply to finish
+                        with st.spinner("Agent is thinking..."):
+                            start_time = time.time()
+                            initial_count = len(messages)
+                            got_reply = False
+                            while time.time() - start_time < 40.0:
+                                time.sleep(0.5)
+                                poll_res = requests.get(f"{API_BASE}/api/agents/{selected_agent_id}/messages?threadId={active_thread_id}", headers=get_headers())
+                                if poll_res.status_code == 200:
+                                    current_msgs = poll_res.json()
+                                    if len(current_msgs) > initial_count + 1 or (current_msgs and current_msgs[-1]["sender"] == "agent"):
+                                        got_reply = True
+                                        break
+                            if not got_reply:
+                                st.warning("The agent is taking longer than usual to respond. It will appear once ready — try refreshing shortly.")
                         st.rerun()
                     else:
                         st.error(parse_response_error(post_res, "Failed to send message."))
@@ -659,7 +782,7 @@ with tab_docs:
 
             if submit_up:
                 if uploaded_file:
-                    files = {"file": (uploaded_file.name, uploaded_file.getvalue(), uploaded_file.type)}
+                    files = {"file": (uploaded_file.name, uploaded_file.getvalue(), uploaded_file.type or "application/octet-stream")}
                     data = {"visibility": doc_vis}
                     up_res = requests.post(f"{API_BASE}/api/documents/{team_id}", files=files, data=data, headers=get_headers())
                     if up_res.status_code in [200, 201, 202]:
@@ -710,6 +833,23 @@ with tab_team:
                 st.rerun()
             else:
                 st.error(parse_response_error(u_res, "Failed to save guidelines."))
+
+        st.divider()
+        st.subheader("Invite Team Members (Share Access to Agents)")
+        st.caption("Add team members by email so multiple users can access and collaborate on this team's AI Agents.")
+        
+        with st.form("invite_member_form"):
+            invite_email = st.text_input("User Email Address", placeholder="colleague@company.com")
+            invite_role = st.selectbox("Role", ["member", "admin"])
+            submit_invite = st.form_submit_button("Add Member to Team Workspace", type="primary")
+
+            if submit_invite and invite_email:
+                inv_res = requests.post(f"{API_BASE}/api/teams/{team_id}/members", json={"email": invite_email, "role": invite_role}, headers=get_headers())
+                if inv_res.status_code == 200:
+                    st.success(inv_res.json().get("message", "Member added!"))
+                    st.rerun()
+                else:
+                    st.error(parse_response_error(inv_res, "Failed to add team member."))
 
 # -----------------------------------------------------------------------------
 # TAB 4: CONTEXT ASSISTANT
@@ -786,3 +926,4 @@ with tab_audit:
             st.dataframe(audit_data, use_container_width=True)
         else:
             st.info("No audit logs recorded for this team yet.")
+            

@@ -49,6 +49,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./workspaces:/app/workspaces
       - ./data:/app/data
+      - ./backend/app:/app/app
     depends_on:
       - postgres
       - redis
@@ -77,6 +78,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./workspaces:/app/workspaces
       - ./data:/app/data
+      - ./backend/app:/app/app
     depends_on:
       - backend
       - redis

@@ -31,6 +31,12 @@ async def check_agent_access(agent_id: uuid.UUID, user_id: uuid.UUID, min_role: 
     agent = res.scalars().first()
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
+    
+    # Agent creator always has full access to manage their own agent
+    if agent.created_by == user_id:
+        await verify_team_membership(agent.team_id, user_id, "member", db)
+        return agent
+
     await verify_team_membership(agent.team_id, user_id, min_role, db)
     return agent
 
@@ -43,7 +49,12 @@ async def list_agents(
     t_uuid = uuid.UUID(teamId)
     await verify_team_membership(t_uuid, current_user.id, "member", db)
 
-    res = await db.execute(select(Agent).where(Agent.team_id == t_uuid))
+    res = await db.execute(
+        select(Agent).where(
+            Agent.team_id == t_uuid,
+            (Agent.created_by == current_user.id) | (Agent.visibility == "team")
+        )
+    )
     agents = res.scalars().all()
     return [{
         "id": str(a.id),
@@ -51,6 +62,7 @@ async def list_agents(
         "name": a.name,
         "status": a.status,
         "visibility": a.visibility,
+        "createdBy": str(a.created_by) if a.created_by else None,
         "taskContext": a.task_context,
         "createdAt": a.created_at.isoformat()
     } for a in agents]
@@ -62,12 +74,13 @@ async def create_agent(
     db: AsyncSession = Depends(get_db)
 ):
     t_uuid = uuid.UUID(data.teamId)
-    await verify_team_membership(t_uuid, current_user.id, "admin", db)
+    await verify_team_membership(t_uuid, current_user.id, "member", db)
 
-    config_dict = SERVER_SANDBOX_SETTINGS.copy()
+    config_dict = SERVER_SANDBOX_SETTINGS.model_dump()
 
     agent = Agent(
         team_id=t_uuid,
+        created_by=current_user.id,
         name=data.name,
         task_context=data.taskContext or "",
         visibility=data.visibility or "personal",
@@ -112,6 +125,7 @@ async def get_agent(
         "teamId": str(agent.team_id),
         "name": agent.name,
         "status": agent.status,
+        "containerId": agent.container_id,
         "visibility": agent.visibility,
         "taskContext": agent.task_context,
         "config": agent.config,
@@ -130,7 +144,7 @@ async def delete_agent(
     agent = await check_agent_access(a_uuid, current_user.id, "admin", db)
 
     if agent.status == "running":
-        stop_agent_task.delay(str(agent.id))
+        stop_agent_task.delay(str(agent.id), agent.container_id)
 
     audit = AuditLog(team_id=agent.team_id, user_id=current_user.id, action="agent.delete", metadata_={"agentId": str(agent.id), "name": agent.name})
     db.add(audit)
@@ -148,13 +162,13 @@ async def start_agent(
     a_uuid = uuid.UUID(agent_id)
     agent = await check_agent_access(a_uuid, current_user.id, "member", db)
 
-    agent.status = "pending"
+    agent.status = "starting"
     audit = AuditLog(team_id=agent.team_id, user_id=current_user.id, action="agent.start", metadata_={"agentId": str(agent.id)})
     db.add(audit)
     await db.commit()
 
     spinup_agent_task.delay(str(agent.id))
-    return {"id": str(agent.id), "status": "pending", "message": "Spinup task queued"}
+    return {"id": str(agent.id), "status": "starting", "message": "Spinup task queued"}
 
 @router.post("/{agent_id}/stop")
 async def stop_agent(
@@ -165,13 +179,13 @@ async def stop_agent(
     a_uuid = uuid.UUID(agent_id)
     agent = await check_agent_access(a_uuid, current_user.id, "member", db)
 
-    agent.status = "pending"
+    agent.status = "stopping"
     audit = AuditLog(team_id=agent.team_id, user_id=current_user.id, action="agent.stop", metadata_={"agentId": str(agent.id)})
     db.add(audit)
     await db.commit()
 
     stop_agent_task.delay(str(agent.id))
-    return {"id": str(agent.id), "status": "pending", "message": "Teardown task queued"}
+    return {"id": str(agent.id), "status": "stopping", "message": "Teardown task queued"}
 
 class ContextUpdateSchema(BaseModel):
     taskContext: str
@@ -264,6 +278,12 @@ async def post_agent_message(
     a_uuid = uuid.UUID(agent_id)
     agent = await check_agent_access(a_uuid, current_user.id, "member", db)
 
+    if agent.status != "running":
+        raise HTTPException(
+            status_code=400,
+            detail="Agent sandbox container is stopped. Please click 'Start Sandbox Container' above first."
+        )
+
     user_msg = AgentMessage(
         agent_id=agent.id,
         user_id=current_user.id,
@@ -284,3 +304,27 @@ async def post_agent_message(
         "threadId": user_msg.thread_id,
         "createdAt": user_msg.created_at.isoformat()
     }
+
+class UpdateVisibilitySchema(BaseModel):
+    visibility: str
+
+@router.patch("/{agent_id}/visibility")
+async def update_agent_visibility(
+    agent_id: str,
+    data: UpdateVisibilitySchema,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    a_uuid = uuid.UUID(agent_id)
+    agent = await check_agent_access(a_uuid, current_user.id, "admin", db)
+
+    if data.visibility not in ["personal", "team"]:
+        raise HTTPException(status_code=400, detail="Visibility must be 'personal' or 'team'")
+
+    agent.visibility = data.visibility
+    audit = AuditLog(team_id=agent.team_id, user_id=current_user.id, action="agent.visibility_update", metadata_={"agent_id": str(agent.id), "visibility": data.visibility})
+    db.add(audit)
+    await db.commit()
+
+    return {"id": str(agent.id), "visibility": agent.visibility, "message": f"Agent visibility set to '{data.visibility}'"}
+    

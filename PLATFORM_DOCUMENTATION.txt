@@ -1,0 +1,182 @@
+================================================================================
+OPENCLAW ENTERPRISE AI AGENT PLATFORM - COMPLETE TECHNICAL DOCUMENTATION
+================================================================================
+Generated: 2026-07-31
+Platform Version: 2.5 (Production Enterprise Build)
+
+--------------------------------------------------------------------------------
+1. SYSTEM OVERVIEW & ARCHITECTURE PURPOSE
+--------------------------------------------------------------------------------
+The OpenClaw Platform is a high-performance, multi-tenant enterprise AI Agent 
+orchestration system. It allows organizations to deploy isolated AI Agents 
+operating inside secure, resource-capped Docker containers. 
+
+Key Platform Capabilities:
+1. Multi-Tenant Team Workspaces: Role-Based Access Control (RBAC) supporting 
+   Owners, Admins, and Members.
+2. Strict Security Sandboxing: Every agent runs in a dedicated Docker sandbox 
+   with 256MB RAM caps, 0.5 CPU limits, read-only root filesystems, and zero 
+   external network access.
+3. Strict Per-Agent Document RAG: Vector search (PostgreSQL pgvector) queries 
+   only reference documents explicitly attached to that specific agent ID.
+4. Multimodal Input: Text chat and native browser speech-to-text live microphone 
+   input powered by Groq Whisper.
+5. High-Speed LLM Inference: Powered by Groq Llama-3.3 70B Engine.
+6. Persistent ChatGPT-Style UI: Multi-thread sidebar navigation, instant 
+   thread deletion, context brief compilers, and audit logging.
+
+--------------------------------------------------------------------------------
+2. TECHNICAL STACK & INFRASTRUCTURE
+--------------------------------------------------------------------------------
+- Frontend: Streamlit >= 1.40 (Python) with custom Dark Glassmorphism CSS, 
+  Plus Jakarta Sans typography, and native browser microphone recorder (`st.audio_input`).
+- Backend API: FastAPI (Python 3.11), SQLAlchemy AsyncSession, Pydantic v2.
+- Database: PostgreSQL 15+ with `pgvector` extension for 384-dimensional vector embeddings.
+- Async Broker & Workers: Redis 7.0 & Celery 5.3 background task queue for 
+  asynchronous container spin-up, document embedding chunking, and LLM processing.
+- Container Infrastructure: Docker Engine SDK (`docker` Python package).
+- AI Models & APIs:
+  * Text LLM Inference: Groq API (`llama-3.3-70b-versatile`)
+  * Speech STT Transcription: Groq API (`distil-whisper-large-v3-en`, English enforced)
+  * Vector Embeddings: SentenceTransformers / Nomic-embed-text (384-dim)
+
+--------------------------------------------------------------------------------
+3. COMPLETE CODEBASE FILE-BY-FILE BREAKDOWN
+--------------------------------------------------------------------------------
+
+[FRONTEND LAYER]
+----------------
+1. frontend/app.py:
+   - Serves as the interactive web interface (Port 8501).
+   - Manages authentication state (JWT tokens), session persistence, and active team workspace switching.
+   - Provides 5 primary tab views:
+     * Tab 1 (Agent Hub): Create new agents, list agents, toggle sandbox container lifecycle (Start/Stop), manage active chat threads, toggle visibility (Share with Team / Make Personal), live microphone voice recorder (`st.audio_input`).
+     * Tab 2 (Document Library): Upload company reference files (.txt, .pdf, .docx) for team and agent vector RAG search.
+     * Tab 3 (Team Guidelines): View and edit standing team context guidelines, invite new team members by email address.
+     * Tab 4 (Context Assistant): Interactive questionnaire compiler to create structured operational briefs (`MEMORY.md`).
+     * Tab 5 (Audit Logs): Real-time security audit log table tracking user and container actions.
+   - Sidebar: Displays user identity, active workspace selector with auto-switch smart detection, ChatGPT-style thread history, and "+ New Conversation" controls.
+
+2. frontend/requirements.txt:
+   - Python dependencies: `streamlit>=1.40.0`, `requests`, `audio-recorder-streamlit`.
+
+[BACKEND CORE & API LAYER]
+--------------------------
+3. backend/app/main.py:
+   - FastAPI application entrypoint (Port 8000).
+   - Configures CORS middleware, registers API route routers, and initializes PostgreSQL database schemas on startup.
+
+4. backend/app/core/config.py:
+   - Environment settings parser loading `GROQ_API_KEY`, `DATABASE_URL`, `REDIS_URL`, `SECRET_KEY`, and security toggles (`ALLOW_UNSANDBOXED_DEV_MODE = False`).
+
+5. backend/app/core/sandbox_config.py:
+   - Server-side immutable sandbox configuration defaults (`SERVER_SANDBOX_SETTINGS`):
+     * `sandboxMode`: "all"
+     * `sandboxBackend`: "docker"
+     * `sandboxDockerNetwork`: "none" (isolated network)
+     * `sandboxDockerReadOnlyRoot`: True
+     * `sandboxDockerCapDrop`: ["ALL"]
+     * `memoryLimit`: 268435456 (256MB RAM)
+     * `cpuLimit`: 500000000 (0.5 CPU cores)
+   - Defines `AgentCustomConfigSchema` with `extra="forbid"` to prevent client-side security parameter overrides.
+
+6. backend/app/api/auth.py:
+   - Endpoints:
+     * `POST /api/auth/register`: Hashes passwords (Bcrypt), creates user account, initializes default personal team workspace.
+     * `POST /api/auth/login`: Validates credentials, issues JWT access token & refresh token.
+     * `GET /api/auth/me`: Returns user profile and all team memberships.
+
+7. backend/app/api/teams.py:
+   - Endpoints:
+     * `POST /api/teams`: Creates a new team workspace.
+     * `GET /api/teams/{team_id}`: Retrieves team details and standing guidelines.
+     * `PATCH /api/teams/{team_id}/context`: Updates standing team context guidelines.
+     * `POST /api/teams/{team_id}/members`: Invites a user to a team workspace by email.
+
+8. backend/app/api/agents.py:
+   - Endpoints:
+     * `GET /api/agents?teamId=...`: Lists agents visible to current user (creator or `team` visibility).
+     * `POST /api/agents`: Creates a new agent bound to team workspace with optional document attachments.
+     * `GET /api/agents/{agent_id}`: Fetches specific agent details.
+     * `POST /api/agents/{agent_id}/start`: Dispatches Celery task to spin up Docker sandbox container.
+     * `POST /api/agents/{agent_id}/stop`: Dispatches Celery task to stop Docker sandbox container.
+     * `PATCH /api/agents/{agent_id}/visibility`: Toggles agent visibility (`personal` vs `team`).
+     * `GET /api/agents/{agent_id}/threads`: Retrieves list of distinct conversation thread IDs.
+     * `DELETE /api/agents/{agent_id}/threads/{thread_id}`: Deletes all messages in a specific chat thread.
+     * `POST /api/agents/{agent_id}/messages`: Accepts user text prompt and queues Celery task for processing.
+
+9. backend/app/api/documents.py:
+   - Endpoints:
+     * `POST /api/documents/upload`: Stores uploaded reference files on disk, records metadata in PostgreSQL, queues extraction task.
+     * `GET /api/documents/{team_id}`: Lists documents uploaded under team workspace.
+
+10. backend/app/api/voice.py:
+    - Endpoint:
+      * `POST /api/voice/transcribe`: Accepts WAV/MP3 audio file payload, invokes Groq Whisper API (`distil-whisper-large-v3-en`, `language="en"`), returns transcribed English text string.
+
+[SANDBOXING & TASK WORKER LAYER]
+--------------------------------
+11. backend/app/sandboxing/docker_manager.py:
+    - Wraps Docker Python SDK (`docker.from_env()`).
+    - Enforces `SERVER_SANDBOX_SETTINGS` for container creation.
+    - Creates isolated agent workspace directory (`workspaces/{agent_id}`).
+    - `spinup_agent_container()`: Launches Docker container `openclaw-agent-{agent_id}`. Raises `RuntimeError` on failure (no fallback).
+    - `stop_agent_container()`: Safely stops and removes container.
+
+12. backend/app/tasks/tasks.py:
+    - Celery asynchronous background tasks:
+      * `spinup_agent_task(agent_id)`: Manages status transition (`pending` -> `starting` -> `running`) and invokes container launcher.
+      * `stop_agent_task(agent_id)`: Manages status transition (`stopping` -> `stopped`) and removes container.
+      * `extract_document_task(document_id)`: Extracts file text, splits text into overlapping chunks, generates 384-dim vector embeddings, inserts into `document_chunks` table using SQL `CAST(:emb AS vector)`.
+      * `process_message_task(agent_id, message_id)`: Performs vector similarity search (RAG) strictly filtered by `agent_id`, constructs augmented prompt (MEMORY.md brief + document chunks + team guidelines + thread history), calls Groq Llama-3.3 API, saves response to PostgreSQL `agent_messages`, and publishes Redis WebSocket event.
+
+[DATABASE MODELS & CONTAINER CONFIG]
+------------------------------------
+13. backend/app/db/models.py:
+    - SQLAlchemy models: `User`, `Team`, `TeamMember`, `Agent`, `agent_documents` (junction table), `AgentRun`, `AgentMessage`, `Document`, `DocumentChunk`, `AuditLog`.
+
+14. docker-compose.yml:
+    - Orchestrates local infrastructure microservices: `postgres` (pgvector), `redis`, `backend` (FastAPI), `celery_worker`, `frontend` (Streamlit).
+
+--------------------------------------------------------------------------------
+4. STEP-BY-STEP DATA FLOW & WORKFLOW EXPLANATION
+--------------------------------------------------------------------------------
+
+[WORKFLOW 1: TEXT QUERY & RAG PROCESSING]
+1. User types a question (e.g., "What is the net profit?") in Streamlit UI and hits Enter.
+2. Streamlit calls `POST /api/agents/{agent_id}/messages` with payload `{"text": "...", "threadId": "..."}`.
+3. FastAPI saves user message to `agent_messages` table and dispatches `process_message_task.delay()` to Celery/Redis.
+4. Celery worker receives job:
+   a. Generates 384-dim embedding for user prompt.
+   b. Queries PostgreSQL `document_chunks` table joining `agent_documents` where `agent_id` matches strictly.
+   c. Ranks matching chunks by cosine similarity score (> 0.15 threshold).
+   d. Assembles context string from top 5 document chunks + agent `MEMORY.md` brief + standing team guidelines + thread message history.
+   e. Calls Groq Llama-3.3 LLM engine.
+5. Celery worker saves AI assistant response to `agent_messages` and updates status to completed.
+6. Streamlit UI fetches updated messages and displays response bubble in chat view.
+
+[WORKFLOW 2: LIVE VOICE RECORDING & TRANSCRIPTION]
+1. User clicks the live microphone button under "Live Microphone Speech Input".
+2. Browser records microphone audio in WAV format.
+3. User clicks "Transcribe Voice & Send to Agent".
+4. Streamlit sends WAV bytes to `POST /api/voice/transcribe`.
+5. FastAPI `voice.py` receives file, sets `language="en"`, and calls Groq Whisper (`distil-whisper-large-v3-en`).
+6. Groq Whisper transcribes speech into English text string.
+7. Streamlit automatically submits transcribed text string to Workflow 1 (Text Query Flow).
+
+[WORKFLOW 3: TEAM WORKSPACE SHARING & ISOLATION]
+1. User A creates an agent named "Finance Assistant". By default, visibility is set to `personal` (Private to User A).
+2. User A clicks "Share Agent with Team" button in Agent Hub.
+3. Backend updates `visibility = 'team'` in PostgreSQL `agents` table.
+4. User A invites User B via email in "Team Guidelines" tab (`POST /api/teams/{team_id}/members`).
+5. User B logs in. The sidebar dropdown lists User A's team workspace (`A's Team (MEMBER)`).
+6. User B selects the shared team workspace. The "Finance Assistant" agent appears for User B to chat with, while maintaining complete container sandbox isolation.
+
+--------------------------------------------------------------------------------
+5. SECURITY GUARANTEES & COMPLIANCE SUMMARY
+--------------------------------------------------------------------------------
+1. Client Sandbox Override Prevention: Sandbox parameters are server-enforced constants (`SERVER_SANDBOX_SETTINGS`). Client API payloads attempting to send custom sandbox keys are rejected with HTTP 422.
+2. No Silent Unsandboxed Fallback: If Docker daemon is unavailable, container spinup fails explicitly with `RuntimeError` and status `failed`. The platform NEVER executes agent code on the host machine.
+3. Strict Document RAG Isolation: Vector search queries only search document chunks linked to the active `agent_id` via `agent_documents` table.
+4. Multilingual Noise Hallucination Fix: Voice transcription enforces `distil-whisper-large-v3-en` with `language="en"` context to eliminate non-English noise hallucinations.
+================================================================================

@@ -1,5 +1,6 @@
 import os
 import json
+# pyrefly: ignore [missing-import]
 import redis
 from datetime import datetime, timezone
 from sqlalchemy import create_engine, text
@@ -60,6 +61,19 @@ def spinup_agent_task(agent_id: str):
             status_text = "unsandboxed (dev mode)" if is_dev_mode else "running"
             event_text = "Agent is running (unsandboxed dev mode)" if is_dev_mode else "Agent is running inside sandbox"
 
+            # Guard against a race where Stop was clicked while this container
+            # was still spinning up. If status is no longer 'starting', a stop
+            # was requested in the meantime — tear down what we just created
+            # instead of leaving an orphaned running container.
+            current = conn.execute(
+                text("SELECT status FROM agents WHERE id = :agent_id"),
+                {"agent_id": agent_id}
+            ).fetchone()
+            if not current or current._mapping["status"] != "starting":
+                print(f"[Celery] Agent {agent_id} was stopped during spinup. Aborting and tearing down container.")
+                stop_agent_container(container_id)
+                return
+
             conn.execute(
                 text("""
                     UPDATE agents 
@@ -104,16 +118,18 @@ def spinup_agent_task(agent_id: str):
             publish_agent_event(agent_id, "status_change", {"status": "failed", "error": f"Sandboxing failed: {e}"})
 
 @celery_app.task
-def stop_agent_task(agent_id: str):
+def stop_agent_task(agent_id: str, container_id: str = None):
     print(f"[Celery] Stopping agent {agent_id}")
     with sync_engine.connect() as conn:
-        res = conn.execute(
-            text("SELECT container_id FROM agents WHERE id = :agent_id"),
-            {"agent_id": agent_id}
-        ).fetchone()
+        if not container_id:
+            res = conn.execute(
+                text("SELECT container_id FROM agents WHERE id = :agent_id"),
+                {"agent_id": agent_id}
+            ).fetchone()
+            container_id = res._mapping["container_id"] if res else None
 
-        if res and res._mapping["container_id"]:
-            stop_agent_container(res._mapping["container_id"])
+        if container_id:
+            stop_agent_container(container_id)
 
         conn.execute(
             text("""
@@ -164,9 +180,28 @@ def extract_document_task(document_id: str):
                     result = mammoth.extract_raw_text(docx_file)
                     extracted_text = result.value
             elif ext == ".pdf":
-                import pypdf
-                reader = pypdf.PdfReader(file_path)
-                pages_text = [page.extract_text() for page in reader.pages if page.extract_text()]
+                pages_text = []
+                try:
+                    import pypdf
+                    reader = pypdf.PdfReader(file_path)
+                    for page in reader.pages:
+                        txt = page.extract_text()
+                        if txt:
+                            pages_text.append(txt)
+                except Exception as p_ex:
+                    print(f"[Celery] pypdf warning: {p_ex}")
+
+                if not pages_text:
+                    try:
+                        import pdfplumber
+                        with pdfplumber.open(file_path) as pdf:
+                            for page in pdf.pages:
+                                txt = page.extract_text()
+                                if txt:
+                                    pages_text.append(txt)
+                    except Exception as pl_ex:
+                        print(f"[Celery] pdfplumber warning: {pl_ex}")
+
                 extracted_text = "\n".join(pages_text)
             else:
                 with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
@@ -218,18 +253,9 @@ def extract_document_task(document_id: str):
 
 @celery_app.task
 def process_message_task(agent_id: str, message_id: str):
-    print(f"[Celery] Processing message {message_id} for agent {agent_id}")
+    print(f"[Celery] Processing message task for agent {agent_id}, message {message_id}")
     with sync_engine.connect() as conn:
-        msg_res = conn.execute(
-            text("SELECT * FROM agent_messages WHERE id = :msg_id"),
-            {"msg_id": message_id}
-        ).fetchone()
-
-        if not msg_res:
-            return
-        user_msg = dict(msg_res._mapping)
-
-        agent_res = conn.execute(
+        res = conn.execute(
             text("""
                 SELECT a.*, t.name as team_name, t.context_md as team_context
                 FROM agents a
@@ -239,15 +265,42 @@ def process_message_task(agent_id: str, message_id: str):
             {"agent_id": agent_id}
         ).fetchone()
 
-        if not agent_res:
+        if not res:
             return
-        agent = dict(agent_res._mapping)
 
-        if agent.get("container_id") and agent["status"] == "running":
-            try:
-                exec_container_command(agent["container_id"], f"echo '[CHAT] ({datetime.now(timezone.utc).isoformat()}) Message: {user_msg['text']}' >> /workspace/chat.log")
-            except Exception as ex:
-                print(f"[Celery] Container exec warning: {ex}")
+        agent = dict(res._mapping)
+
+        msg_res = conn.execute(
+            text("SELECT * FROM agent_messages WHERE id = :msg_id"),
+            {"msg_id": message_id}
+        ).fetchone()
+
+        if not msg_res:
+            return
+
+        user_msg = dict(msg_res._mapping)
+
+        if agent["status"] != "running" or not agent["container_id"]:
+            print(f"[Celery] Agent {agent_id} is stopped. Aborting message processing.")
+            conn.execute(
+                text("""
+                    INSERT INTO agent_messages (agent_id, user_id, sender, text, thread_id)
+                    VALUES (:agent_id, NULL, 'agent', :text, :thread_id)
+                """),
+                {
+                    "agent_id": agent_id,
+                    "text": "[System] Agent sandbox container is currently STOPPED. Please click 'Start Sandbox Container' above to enable chat execution.",
+                    "thread_id": user_msg["thread_id"]
+                }
+            )
+            conn.commit()
+            publish_agent_event(agent_id, "chat_message_status", {"id": message_id, "status": "failed"})
+            return
+
+        try:
+            exec_container_command(agent["container_id"], f"echo 'Processing prompt: {user_msg['text']}'")
+        except Exception as ex:
+            print(f"[Celery] Container exec warning: {ex}")
 
         query_emb = generate_embedding(user_msg["text"])
 
@@ -269,23 +322,24 @@ def process_message_task(agent_id: str, message_id: str):
             if isinstance(emb_vec, str):
                 emb_vec = [float(x) for x in emb_vec.strip("[]").split(",")]
             score = cosine_similarity(query_emb, emb_vec)
-            if score > 0.15:
-                matched_chunks.append({"content": r["content"], "filename": r["filename"], "score": score})
+            matched_chunks.append({"content": r["content"], "filename": r["filename"], "score": score})
 
         matched_chunks.sort(key=lambda x: x["score"], reverse=True)
-        top_chunks = matched_chunks[:5]
+        top_chunks = matched_chunks[:6]
 
+        context_str = ""
         if top_chunks:
-            context_str = ""
             for chunk in top_chunks:
                 context_str += f"\n--- Document: {chunk['filename']} ---\n{chunk['content']}\n"
+        else:
+            context_str = "[No documents available in knowledge base]"
 
-            system_prompt = f"""You are an AI assistant for agent "{agent['name']}" in team "{agent['team_name']}".
+        system_prompt = f"""You are an AI assistant for agent "{agent['name']}" in team "{agent['team_name']}".
 Task Context: {agent['task_context']}
 
-Answer the user's message using the reference team document excerpts provided below whenever applicable.
+You have FULL access to the reference document excerpts provided below. Read them carefully and answer the user's question directly, accurately, and concisely using the facts in these excerpts. Do NOT claim you lack access to the document.
 
-Reference Team Documents:
+Reference Documents Content:
 \"\"\"
 {context_str}
 \"\"\"
@@ -293,14 +347,6 @@ Reference Team Documents:
 Standing Team Guidelines:
 \"\"\"
 {agent['team_context']}
-\"\"\"
-"""
-        else:
-            system_prompt = f"""You are an AI assistant for agent "{agent['name']}" in team "{agent['team_name']}".
-
-Agent Task Context:
-\"\"\"
-{agent['task_context'] or 'Provide helpful operational assistance.'}
 \"\"\"
 
 Standing Team Guidelines:
@@ -316,11 +362,36 @@ Standing Team Guidelines:
 
         try:
             provider = get_llm_provider()
-            import asyncio
-            reply_text = asyncio.run(provider.generate(messages=messages, temperature=0.1, max_tokens=1024))
+            reply_text = provider.generate_sync(messages=messages, temperature=0.1, max_tokens=1024)
         except Exception as e:
             print(f"[Celery] LLM Provider generation error: {e}")
             reply_text = "I'm sorry, an error occurred while processing the response from the LLM provider."
+
+        # Re-check status AFTER generation — the agent may have been stopped
+        # while the LLM call was in flight. Without this, a stopped agent
+        # can still deliver an answer that was already being generated.
+        status_check = conn.execute(
+            text("SELECT status FROM agents WHERE id = :agent_id"),
+            {"agent_id": agent_id}
+        ).fetchone()
+        current_status = status_check._mapping["status"] if status_check else None
+
+        if current_status != "running":
+            print(f"[Celery] Agent {agent_id} was stopped mid-generation. Discarding reply.")
+            conn.execute(
+                text("""
+                    INSERT INTO agent_messages (agent_id, user_id, sender, text, thread_id)
+                    VALUES (:agent_id, NULL, 'agent', :text, :thread_id)
+                """),
+                {
+                    "agent_id": agent_id,
+                    "text": "[System] Agent was stopped while this response was being generated. The response was discarded.",
+                    "thread_id": user_msg["thread_id"]
+                }
+            )
+            conn.commit()
+            publish_agent_event(agent_id, "chat_message_status", {"id": message_id, "status": "failed"})
+            return
 
         reply_res = conn.execute(
             text("""
@@ -384,3 +455,4 @@ def prune_idle_agents_task(idle_hours: int = 2):
             print("[Celery Periodic Task] Idle agent pruning completed.")
         else:
             print("[Celery Periodic Task] No idle agents found.")
+            
