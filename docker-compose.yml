@@ -42,7 +42,7 @@ services:
       - REDIS_PORT=6379
       - LLM_PROVIDER=${LLM_PROVIDER:-groq}
       - GROQ_API_KEY=${GROQ_API_KEY}
-      - GROQ_MODEL=${GROQ_MODEL:-llama-3.3-70b-versatile}
+      - GROQ_MODEL=${GROQ_MODEL:-groq/compound}
     ports:
       - "8000:8000"
     volumes:
@@ -73,7 +73,7 @@ services:
       - REDIS_PORT=6379
       - LLM_PROVIDER=${LLM_PROVIDER:-groq}
       - GROQ_API_KEY=${GROQ_API_KEY}
-      - GROQ_MODEL=${GROQ_MODEL:-llama-3.3-70b-versatile}
+      - GROQ_MODEL=${GROQ_MODEL:-groq/compound}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./workspaces:/app/workspaces

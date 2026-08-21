@@ -1,6 +1,14 @@
 import os
+import re
 import httpx
 from app.core.config import settings
+
+def _clean_llm_response(text: str) -> str:
+    if not text:
+        return ""
+    # Strip <think>...</think> reasoning blocks if present
+    cleaned = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
+    return cleaned if cleaned else text.strip()
 
 class BaseLLMProvider:
     async def generate(self, messages: list[dict], temperature: float = 0.7, max_tokens: int = 1024) -> str:
@@ -30,7 +38,8 @@ class GroqLLMProvider(BaseLLMProvider):
             resp = await client.post(self.url, headers=headers, json=payload)
             resp.raise_for_status()
             data = resp.json()
-            return data["choices"][0]["message"]["content"]
+            raw_content = data["choices"][0]["message"]["content"]
+            return _clean_llm_response(raw_content)
 
     def generate_sync(self, messages: list[dict], temperature: float = 0.7, max_tokens: int = 1024) -> str:
         headers = {
@@ -47,7 +56,8 @@ class GroqLLMProvider(BaseLLMProvider):
             resp = client.post(self.url, headers=headers, json=payload)
             resp.raise_for_status()
             data = resp.json()
-            return data["choices"][0]["message"]["content"]
+            raw_content = data["choices"][0]["message"]["content"]
+            return _clean_llm_response(raw_content)
 
 class TGILLMProvider(BaseLLMProvider):
     def __init__(self, endpoint_url: str):

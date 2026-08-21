@@ -91,6 +91,10 @@ def run_integration_test():
         agent_data = agent_res.json()
         agent_id = agent_data["id"]
         log_step("5. Agent Creation & Sandbox Setup", True, f"Agent ID: {agent_id} | Name: {agent_data['name']}")
+        
+        # Start the Agent Sandbox Container
+        start_agent_res = requests.post(f"{BASE_URL}/api/agents/{agent_id}/start", headers=headers)
+        assert start_agent_res.status_code in [200, 202]
     except Exception as e:
         log_step("5. Agent Creation & Sandbox Setup", False, str(e))
         return

@@ -1,0 +1,568 @@
+====================================================================================================
+               OPENCLAW PYTHON PLATFORM - COMPLETE CODEBASE TECHNICAL EXPLANATION
+====================================================================================================
+
+DOCUMENT OVERVIEW:
+This text document provides a complete, line-by-line and section-by-section breakdown of every single file in the OpenClaw Multi-Tenant AI Agent Orchestration & RAG Platform codebase. It explains:
+1. What each file does and its role in the system architecture.
+2. Why each framework, library, database, and design pattern was chosen over alternatives ("Why this and not something else").
+3. How each piece of code works line-by-line/section-by-section under the hood.
+4. "Used What For What" mapping matrix.
+
+====================================================================================================
+SECTION 1: SYSTEM ARCHITECTURE & OVERVIEW
+====================================================================================================
+
+OpenClaw is an Enterprise Multi-Tenant AI Agent Orchestration and Retrieval-Augmented Generation (RAG) platform built in Python. 
+
+Core Architecture:
+- Frontend UI: Streamlit high-contrast glassmorphic single-page web app with real-time audio microphone recording, chat thread management, document uploads, agent lifecycle controls, and team workspace administration.
+- REST API Backend: FastAPI async server serving endpoints for Auth (JWT + Refresh Tokens), Team Workspaces, Agent Lifecycle Management, Document Ingestion, Context Brief Compiling, Voice Transcription, WebSocket streaming, and Governance Audit Logging.
+- Database: PostgreSQL 16 with the pgvector extension for unified multi-tenant relational persistence and 384-dimensional vector embedding store.
+- Task Queue & Background Workers: Celery distributed task queue backed by Redis for asynchronous long-running background tasks (Docker agent container spin-up/teardown, document chunking & vector embedding generation, LLM query grounding, and periodic idle container pruning).
+- Real-Time Pub/Sub: Redis Pub/Sub for broadcasting container status events and chat message execution feedback over WebSockets.
+- Container Security Sandboxing: Docker Python SDK orchestrating isolated Docker containers (`alpine:latest`) per active agent with read-only root filesystems, dropped Linux capabilities (`CAP_DROP=["ALL"]`), disabled networking (`network_mode="none"`), memory limits (256MB), CPU limits (0.5 CPU), and local workspace volume binds (`/workspace/MEMORY.md`).
+- LLM Provider Interface: Groq API integration using `llama-3.3-70b-versatile` (or optional local TGI Text Generation Inference endpoint) for high-speed inference.
+- Local RAG Embeddings Engine: `SentenceTransformers` (`all-MiniLM-L6-v2`) generating 384-dimensional dense vectors stored in pgvector.
+- Voice STT Integration: Groq Audio Transcriptions API powered by `distil-whisper-large-v3-en` (with fallback to `whisper-large-v3`) with automated hallucination filtering.
+
+
+====================================================================================================
+SECTION 2: "USED WHAT FOR WHAT" (TECHNOLOGY & TOOL MAPPING MATRIX)
+====================================================================================================
+
+1. Python 3.11+: Core programming language chosen for its rich ecosystem in AI/ML, async I/O support, and containerization efficiency.
+2. FastAPI (`fastapi==0.111.0`): Used for building high-performance, asynchronous REST APIs and WebSockets with automatic OpenAPI docs and Pydantic validation.
+3. Uvicorn (`uvicorn==0.30.1`): Used as the ASGI HTTP server to run the FastAPI application asynchronously.
+4. Streamlit (`streamlit>=1.40.0`): Used to render the interactive, modern dark-mode frontend UI without needing complex React/Vue frontend build pipelines.
+5. Audio Recorder Streamlit (`audio-recorder-streamlit==0.0.10`): Used to capture live microphone audio directly from the user's web browser for voice-to-text chat inputs.
+6. PostgreSQL 16 + pgvector (`pgvector/pgvector:pg16`): Used as the central relational database for user accounts, teams, agents, messages, audit logs, AND as the vector database for RAG document chunk embeddings.
+7. SQLAlchemy 2.0 (`sqlalchemy[asyncio]==2.0.31`): Used as the Object-Relational Mapper (ORM) for both Async database queries (FastAPI async sessions) and Sync database queries (Celery sync tasks).
+8. AsyncPG (`asyncpg==0.29.0`): Used as the high-speed asynchronous PostgreSQL database driver for SQLAlchemy inside FastAPI.
+9. Psycopg2-Binary (`psycopg2-binary==2.9.9`): Used as the synchronous PostgreSQL database driver for SQLAlchemy inside Celery background workers.
+10. Pgvector Python (`pgvector==0.2.5`): Used to bind 384-dimensional floating-point Python lists directly to PostgreSQL `VECTOR(384)` database columns.
+11. Redis (`redis==5.0.6`): Used dual-purpose as:
+    a) Celery message broker and result backend.
+    b) Pub/Sub event bus for streaming live agent status updates to WebSockets.
+12. Celery (`celery==5.4.0`): Used to run heavy, long-running background tasks asynchronously (container spin-up, PDF/DOCX text parsing, vector embedding generation, LLM calls) outside the HTTP request/response cycle.
+13. Docker SDK (`docker==7.1.0`): Used to programmatically manage isolated Docker sandbox containers for each running agent.
+14. Python-JOSE (`python-jose[cryptography]==3.3.0`): Used for encoding and decoding secure JWT access tokens for user authentication.
+15. Passlib + Bcrypt (`passlib[bcrypt]==1.7.4`, `bcrypt==4.1.3`): Used for secure password hashing (salted bcrypt) and password verification.
+16. HTTPX (`httpx==0.27.0`): Used for async and sync HTTP calls to external LLM endpoints (Groq API, Whisper STT API).
+17. Sentence-Transformers (`sentence-transformers==3.0.1`): Used to run local, zero-cost vector embedding inference (`all-MiniLM-L6-v2` model) converting document chunks and queries into 384-dimensional vectors.
+18. Mammoth (`mammoth==1.7.0`): Used for extracting raw plaintext from Microsoft Word (`.docx`) files.
+19. PyPDF (`pypdf==4.2.0`) & PDFPlumber (`pdfplumber==0.11.0`): Used for extracting text from PDF documents with fallback support for complex layouts.
+20. Pydantic & Pydantic-Settings (`pydantic==2.7.4`, `pydantic-settings==2.3.4`): Used for strict schema validation, type safety, environment variable parsing, and security input sanitizer logic.
+21. Groq Llama 3.3 70B (`llama-3.3-70b-versatile`): Used as the primary LLM model for fast, grounded RAG reasoning and answer generation.
+22. Groq Whisper (`distil-whisper-large-v3-en`): Used for ultra-fast English speech-to-text voice transcription.
+
+
+====================================================================================================
+SECTION 3: ARCHITECTURAL DESIGN & ALTERNATIVE COMPARISON ("WHY THIS AND NOT SOMETHING ELSE")
+====================================================================================================
+
+1. Why FastAPI instead of Flask or Django?
+   - Asynchronous I/O Native Support: FastAPI relies on `asyncio`, enabling non-blocking execution for WebSocket connections, database queries, and external HTTP calls. Flask is traditionally synchronous and handles concurrent requests poorly without gevent/gunicorn wrappers.
+   - Pydantic Integration: Automatic data validation, serialization, and error responses without manual boilerplate.
+   - Speed: Benchmark tests place FastAPI alongside Node.js and Go in performance, far outperforming Django.
+
+2. Why Streamlit instead of React / Next.js?
+   - Development Speed & Pure Python Ecosystem: Streamlit enables building rich, stateful web interfaces entirely in Python without requiring a separate Node.js build system, frontend packages, or TypeScript compilation.
+   - Direct Session State: Simplifies state management (tokens, active agent selection, thread history) across tab reruns.
+
+3. Why PostgreSQL + pgvector instead of a dedicated Vector DB (Pinecone, ChromaDB, Weaviate)?
+   - Single Database Architecture (ACID Compliance): Eliminates data synchronization drift between relational data (teams, documents, agent ownership) and vector data. Deleting a document in PostgreSQL automatically cascades and deletes its vectors via standard SQL `ON DELETE CASCADE`.
+   - Zero Additional SaaS Cost / Self-Hosted Simplicity: Running `pgvector` inside the PostgreSQL container costs $0 and requires no external API keys or cloud service subscriptions.
+
+4. Why Celery + Redis instead of Python BackgroundTasks / ThreadPoolExecutor?
+   - Process Isolation & Reliability: FastAPI's built-in `BackgroundTasks` run inside the ASGI web process. If a heavy document extraction or LLM call crashes or leaks memory, it crashes the web server. Celery runs in isolated worker processes that can be scaled horizontally.
+   - Distributed Task Persistence: Tasks queued in Redis survive server restarts and can be retried automatically.
+
+5. Why Docker SDK Sandboxing instead of raw `subprocess` or `exec` execution?
+   - Security & System Protection: Running untrusted AI agent code or file outputs via raw `subprocess` allows malicious or faulty scripts to access the host OS filesystem, network, and environment secrets. Docker containers enforce strict isolation with `read_only` root filesystems, dropped capabilities (`CAP_DROP=["ALL"]`), disabled network access (`network_mode="none"`), and hard memory/CPU caps.
+
+6. Why SentenceTransformers `all-MiniLM-L6-v2` instead of OpenAI `text-embedding-3-small`?
+   - Local, Offline & Zero API Cost: SentenceTransformers runs locally inside the application container, generating embeddings instantly without external API rate limits, billing, or network latency.
+   - High Performance: 384 dimensions provide high semantic accuracy for domain documents while occupying minimal memory and storage space in pgvector.
+
+7. Why Groq API (`llama-3.3-70b-versatile`) instead of standard OpenAI GPT-4?
+   - Extreme Inference Speed (LPU Hardware): Groq's Language Processing Units (LPUs) deliver speeds of 300+ tokens per second, making agent interactions feel instant.
+   - Cost-Efficiency: Significantly lower cost per million tokens compared to GPT-4o.
+
+
+====================================================================================================
+SECTION 4: COMPREHENSIVE FILE-BY-FILE & CODE-LEVEL BREAKDOWN
+====================================================================================================
+
+----------------------------------------------------------------------------------------------------
+FILE 1: backend/app/main.py
+----------------------------------------------------------------------------------------------------
+Role & Purpose:
+Entry point for the FastAPI backend web application. Initializes the FastAPI instance, configures Cross-Origin Resource Sharing (CORS), mounts all API sub-routers, defines the root health-check endpoint, and provides an executable main block for development running via Uvicorn.
+
+Line-by-Line / Section-by-Section Explanation:
+- Lines 1-5: Imports required modules. `FastAPI` creates the application; `CORSMiddleware` handles cross-origin requests; `settings` loads app configurations; imports API routers (`auth`, `teams`, `agents`, `documents`, `audit`, `ws`, `context_assistant`, `voice`).
+- Lines 7-11: Instantiates `app = FastAPI(...)` with metadata (`title`, `version`, `description`) which auto-populates the interactive Swagger docs (`/docs`).
+- Lines 13-19: Adds `CORSMiddleware` configured to allow all origins (`allow_origins=["*"]`), credentials, HTTP methods, and headers. This allows the Streamlit frontend (running on port 8501) to make API calls to the backend (on port 8000) without browser CORS blocks.
+- Lines 21-28: Mounts all 8 modular API routers onto the main app instance using `app.include_router(...)`.
+- Lines 30-37: Defines root GET route `@app.get("/")` returning JSON status indicator (`status: online`, project name, active LLM provider, version).
+- Lines 39-41: Standard Python entry point block. Runs Uvicorn ASGI server binding to host `0.0.0.0` on port `8000` with hot-reload enabled (`reload=True`).
+
+Why this implementation?
+Modular router inclusion (`app.include_router`) keeps API endpoints decoupled, clean, and maintainable across domain contexts.
+
+----------------------------------------------------------------------------------------------------
+FILE 2: backend/app/core/config.py
+----------------------------------------------------------------------------------------------------
+Role & Purpose:
+Central configuration settings manager for the backend application. Uses `pydantic_settings.BaseSettings` to load environment variables from system environment or `.env` files with sensible fallback defaults.
+
+Line-by-Line / Section-by-Section Explanation:
+- Lines 1-2: Imports `os` and `BaseSettings`.
+- Lines 4-10: Defines `Settings` class inheriting from `BaseSettings`. Sets JWT security parameters: `SECRET_KEY`, `ALGORITHM` ("HS256"), access token expiration (24 hours), refresh token expiration (7 days).
+- Lines 11-15: Database connection settings (`DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`). Defaults host to `"postgres"` (Docker service name) and port `5432`.
+- Lines 17-23: Computed dynamic properties `ASYNC_DATABASE_URL` (uses `postgresql+asyncpg://`) for FastAPI async SQLAlchemy sessions, and `SYNC_DATABASE_URL` (uses `postgresql://` via psycopg2) for Celery sync workers.
+- Lines 25-30: Redis configuration (`REDIS_HOST`, `REDIS_PORT`) and computed `REDIS_URL` property (`redis://redis:6379/0`).
+- Lines 32-36: LLM Provider parameters (`LLM_PROVIDER` default `"groq"`, `GROQ_API_KEY`, default model `"llama-3.3-70b-versatile"`, and local `TGI_ENDPOINT_URL`).
+- Lines 38-39: `ALLOW_UNSANDBOXED_DEV_MODE`: Boolean setting parsed from environment. When `True`, allows fallback to local folder workspace sandboxing if Docker daemon is not running on the host machine.
+- Lines 41-43: `WORKSPACES_ROOT`: Absolute filepath to the root workspace directory storing agent `MEMORY.md` files and synced document references (`./workspaces`).
+- Line 44: Instantiates global singleton `settings = Settings()`.
+
+Why this implementation?
+`pydantic-settings` provides strict type casting and validation for environment variables at startup, preventing runtime errors caused by missing configs.
+
+----------------------------------------------------------------------------------------------------
+FILE 3: backend/app/core/sandbox_config.py
+----------------------------------------------------------------------------------------------------
+Role & Purpose:
+Defines server-enforced security constants for Docker sandbox containers and Pydantic validation schemas to prevent user/client tampering with sandbox security parameters.
+
+Line-by-Line / Section-by-Section Explanation:
+- Lines 1-2: Imports Pydantic `BaseModel` and `ConfigDict`.
+- Lines 4-12: Defines `SandboxSettings` schema:
+  - `sandboxMode`: `"all"` (all agents must run inside containers).
+  - `sandboxBackend`: `"docker"`.
+  - `sandboxDockerNetwork`: `"none"` (disables all outbound and inbound container networking, preventing data exfiltration).
+  - `sandboxDockerReadOnlyRoot`: `True` (prevents containers from modifying OS system files).
+  - `sandboxDockerCapDrop`: `["ALL"]` (drops all Linux kernel capabilities to prevent privilege escalation attacks).
+  - `sandboxDockerImage`: `"alpine:latest"` (lightweight, minimal attack surface container image).
+  - `memoryLimit`: `268435456` bytes (hard cap of 256MB RAM per container).
+  - `cpuLimit`: `500000000` nanocpus (hard limit of 0.5 CPU cores per container).
+- Line 14: Instantiates global immutable object `SERVER_SANDBOX_SETTINGS = SandboxSettings()`.
+- Lines 16-20: Defines `AgentCustomConfigSchema` with `model_config = ConfigDict(extra="forbid")`. This strictly forbids clients from passing custom fields like `sandboxDockerNetwork` or `memoryLimit` when creating/updating agents via API payloads, preventing malicious container security bypasses.
+
+Why this implementation?
+Centralizing immutable security rules in code and using `extra="forbid"` enforces multi-tenant container isolation at the API boundary.
+
+----------------------------------------------------------------------------------------------------
+FILE 4: backend/app/core/security.py
+----------------------------------------------------------------------------------------------------
+Role & Purpose:
+Provides cryptographic utility functions for password hashing, password verification, JWT access token generation, access token decoding, and secure random refresh token creation.
+
+Line-by-Line / Section-by-Section Explanation:
+- Lines 1-6: Imports `secrets`, `datetime`, `jose.jwt`, `passlib.context.CryptContext`.
+- Line 8: Instantiates `pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")` using salted bcrypt hashing algorithm.
+- Lines 10-14: `verify_password` compares plain text password with hashed password. `get_password_hash` generates a secure bcrypt hash of a raw password string.
+- Lines 16-23: `create_access_token`: Constructs a JWT payload containing expiration timestamp (`exp`) and custom claims, signing it using `settings.SECRET_KEY` and algorithm `HS256`.
+- Lines 25-30: `decode_access_token`: Verifies token signature and expiration. Returns payload dictionary if valid, or `None` if invalid/expired (`JWTError`).
+- Lines 32-33: `generate_refresh_token`: Uses Python's cryptographically strong `secrets.token_urlsafe(64)` to generate a 64-character unguessable refresh token string.
+
+Why this implementation?
+Bcrypt is industry-standard for password hashing with built-in salting against rainbow table attacks. JOSE JWT tokens provide stateless HTTP authentication.
+
+----------------------------------------------------------------------------------------------------
+FILE 5: backend/app/db/models.py
+----------------------------------------------------------------------------------------------------
+Role & Purpose:
+Defines all SQLAlchemy ORM database models representing PostgreSQL tables, foreign key relationships, indexes, JSONB columns, and pgvector embedding columns.
+
+Line-by-Line / Section-by-Section Explanation:
+- Lines 1-10: Imports UUID generation, datetime, SQLAlchemy column types (`Column`, `String`, `Text`, `DateTime`, `ForeignKey`, `Integer`, `Table`), PostgreSQL specific types (`UUID`, `JSONB`), ORM `relationship`, and `Vector` from `pgvector.sqlalchemy`.
+- Lines 12-17: `agent_documents`: Association table defining Many-to-Many join relationship between `agents` and `documents` with cascade deletion.
+- Lines 19-25: `User` model (`users` table): Stores user ID (UUID PK), unique indexed `email`, `password_hash`, `name`, and `created_at`. Has one-to-many relationship to `TeamMember`.
+- Lines 29-39: `Team` model (`teams` table): Stores team workspace ID, `name`, `created_by` (FK to User), `context_md` (standing markdown team prompt guidelines injected into agents), and relationships to members, agents, and documents.
+- Lines 41-49: `TeamMember` model (`team_members` table): Composite PK (`team_id`, `user_id`). Defines member role (`owner`, `admin`, `member`).
+- Lines 51-59: `Invite` model (`invites` table): Handles pending workspace email invitations.
+- Lines 61-80: `Agent` model (`agents` table): Core agent entity. Fields include `team_id`, `created_by`, `name`, `config` (JSONB), `container_id` (Docker container ID), `status` (`pending`, `starting`, `running`, `stopping`, `stopped`, `failed`), `visibility` (`personal`, `team`), `task_context` (agent objective), `workspace_path`, `started_at`, `stopped_at`.
+- Lines 82-90: `AgentRun` model (`agent_runs` table): Logs agent lifecycle events (`status_change`, `log`, `error`) and structured JSON payloads.
+- Lines 92-103: `AgentMessage` model (`agent_messages` table): Stores chat history messages (`sender`: `user` or `agent`), message `text`, `thread_id` (supports multi-thread chat), and attachments.
+- Lines 105-111: `RefreshToken` model (`refresh_tokens` table): Stores hashed refresh tokens and revocation timestamps for secure session renewal.
+- Lines 113-120: `AuditLog` model (`audit_logs` table): Stores immutable governance audit records (`team_id`, `user_id`, `action`, `metadata`).
+- Lines 122-138: `Document` model (`documents` table): Stores uploaded document metadata (`filename`, `mime_type`, `size_bytes`, `storage_path`, `extraction_status`).
+- Lines 140-148: `DocumentChunk` model (`document_chunks` table): Stores parsed text chunks (`content`), `chunk_index`, and `embedding = Column(Vector(384))` embedding vector for pgvector semantic search.
+
+Why this implementation?
+Unified database schema under SQLAlchemy ensures type safety, cascade deletes, and seamless multi-tenant query isolation across team workspaces.
+
+----------------------------------------------------------------------------------------------------
+FILE 6: backend/app/db/session.py
+----------------------------------------------------------------------------------------------------
+Role & Purpose:
+Manages SQLAlchemy Async engine creation, session factory configuration, declarative base initialization, and FastAPI dependency injection for database sessions.
+
+Line-by-Line / Section-by-Section Explanation:
+- Lines 1-3: Imports `create_async_engine`, `AsyncSession`, `async_sessionmaker`, `declarative_base`.
+- Lines 5-11: Creates `async_engine` connected to `settings.ASYNC_DATABASE_URL` using `asyncpg`. Configures connection pool size (10) and max overflow connections (20) for optimal throughput under load.
+- Lines 13-17: Configures `AsyncSessionLocal = async_sessionmaker(..., expire_on_commit=False)`. Setting `expire_on_commit=False` prevents unexpected database re-fetches when accessing model attributes after committing async sessions.
+- Line 19: Instantiates `Base = declarative_base()` base class for all SQLAlchemy ORM models.
+- Lines 21-26: `get_db()` async generator function. Yields an `AsyncSession` to FastAPI route handlers and guarantees connection cleanup/closure inside a `finally:` block.
+
+Why this implementation?
+Async session handling with `AsyncPG` allows FastAPI to execute concurrent database queries without blocking the event loop.
+
+----------------------------------------------------------------------------------------------------
+FILE 7: backend/app/llm/provider.py
+----------------------------------------------------------------------------------------------------
+Role & Purpose:
+Abstract LLM Provider interface and concrete client implementations for external LLM inference services (Groq API and Text Generation Inference TGI).
+
+Line-by-Line / Section-by-Section Explanation:
+- Lines 1-3: Imports `os`, `httpx`, and `settings`.
+- Lines 5-10: `BaseLLMProvider`: Abstract base class enforcing interface contract with both `async generate()` and `generate_sync()` methods.
+- Lines 12-50: `GroqLLMProvider`:
+  - `__init__`: Sets API key, model (`llama-3.3-70b-versatile`), and endpoint URL (`https://api.groq.com/openai/v1/chat/completions`).
+  - `generate()`: Async method using `httpx.AsyncClient` to POST messages JSON payload with Authorization header. Returns text content of response choice.
+  - `generate_sync()`: Synchronous version using `httpx.Client` for use within sync Celery tasks.
+- Lines 52-78: `TGILLMProvider`: Client for self-hosted HuggingFace Text Generation Inference (TGI) endpoints. Supports both async and sync generation.
+- Lines 80-87: `get_llm_provider()` factory function: Inspects `settings.LLM_PROVIDER` and returns the configured provider instance (defaults to Groq).
+
+Why this implementation?
+Factory pattern (`get_llm_provider`) decouples the platform from specific LLM vendors. Switching from Groq to self-hosted TGI requires changing a single environment variable without altering business logic.
+
+----------------------------------------------------------------------------------------------------
+FILE 8: backend/app/rag/embeddings.py
+----------------------------------------------------------------------------------------------------
+Role & Purpose:
+Generates vector embeddings for text chunks and query strings, and calculates vector cosine similarity scores for RAG document retrieval.
+
+Line-by-Line / Section-by-Section Explanation:
+- Lines 1-2: Imports `List` and `numpy`.
+- Lines 4-11: Lazy-loads `SentenceTransformer('all-MiniLM-L6-v2')` model into singleton `_model`. Lazy loading avoids heavy PyTorch model load overhead during initial application startup until an embedding function is invoked.
+- Lines 13-20: `generate_embedding(text: str)`: Encodes text into a normalized 384-dimensional vector float list. Includes fallback exception handler returning a zero-vector (`[0.0] * 384`) if embedding generation fails.
+- Lines 22-31: `cosine_similarity(a, b)`: Computes dot product divided by product of Euclidean norms (`dot(a,b) / (||a||*||b||)`). Returns similarity score between `0.0` and `1.0`.
+
+Why this implementation?
+Normalized `all-MiniLM-L6-v2` vectors allow fast cosine similarity comparisons via dot product operations.
+
+----------------------------------------------------------------------------------------------------
+FILE 9: backend/app/sandboxing/docker_manager.py
+----------------------------------------------------------------------------------------------------
+Role & Purpose:
+Manages Docker container lifecycle, directory workspace initialization, container spin-up with strict security bounds, container execution, and container cleanup.
+
+Line-by-Line / Section-by-Section Explanation:
+- Lines 1-6: Imports `os`, `docker`, `settings`, `SERVER_SANDBOX_SETTINGS`.
+- Lines 8-9: `get_docker_client()`: Initializes Docker SDK client from host environment (`docker.from_env()`).
+- Lines 11-38: `prepare_agent_workspace()`: Creates host folder structure (`workspaces/{agent_id}/docs/`) and generates `MEMORY.md` brief containing agent profile, standing team context, task objective, and strict execution rules.
+- Lines 40-116: `spinup_agent_container()`:
+  - Pings Docker daemon. If unavailable and `ALLOW_UNSANDBOXED_DEV_MODE=True`, logs warning and falls back to local workspace directory (`local-dev-agent-{agent_id}`).
+  - Removes any existing container matching `openclaw-agent-{agent_id}`.
+  - Pulls `alpine:latest` image if not cached locally.
+  - Launches container via `client.containers.run()` enforcing server security parameters: `command="tail -f /dev/null"`, `detach=True`, `read_only=True`, `cap_drop=["ALL"]`, `network_mode="none"`, `mem_limit=256MB`, `cpuLimit=0.5 CPU`, mounting host workspace to `/workspace` (rw) and `/tmp` (rw).
+- Lines 117-128: `stop_agent_container()`: Stops container gracefully (timeout 5s) and removes container resource.
+- Lines 129-140: `exec_container_command()`: Executes commands inside running container sandbox via `container.exec_run(cmd, workdir="/workspace")`.
+
+Why this implementation?
+Combining host volume bind mounts with immutable Docker security flags gives agents an operational workspace while protecting host system security.
+
+----------------------------------------------------------------------------------------------------
+FILE 10: backend/app/tasks/celery_app.py
+----------------------------------------------------------------------------------------------------
+Role & Purpose:
+Configures the Celery application instance, task serializer formats, Redis message broker connections, and task module auto-discovery.
+
+Line-by-Line / Section-by-Section Explanation:
+- Lines 1-2: Imports `Celery` and `settings`.
+- Lines 4-9: Instantiates `celery_app = Celery("openclaw_tasks", broker=settings.REDIS_URL, backend=settings.REDIS_URL, include=["app.tasks.tasks"])`.
+- Lines 11-18: Configures Celery settings: JSON serialization (`task_serializer="json"`), UTC timezone, and imports module registration.
+
+Why this implementation?
+Using Redis as both broker and backend provides low-latency task queueing without setup complexity.
+
+----------------------------------------------------------------------------------------------------
+FILE 11: backend/app/tasks/tasks.py
+----------------------------------------------------------------------------------------------------
+Role & Purpose:
+Defines background Celery worker tasks for agent container spin-up, agent teardown, document text extraction & embedding generation, LLM message processing with RAG grounding, and periodic idle container pruning.
+
+Line-by-Line / Section-by-Section Explanation:
+- Lines 1-14: Imports SQLAlchemy synchronous engine `create_engine`, `redis.Redis`, `spinup_agent_container`, `get_llm_provider`, `generate_embedding`, `cosine_similarity`.
+- Lines 16-19: `publish_agent_event()`: Publishes JSON events to Redis channel `agent:{agent_id}:events` for real-time WebSocket broadcasting.
+- Lines 21-119: `spinup_agent_task(agent_id)`:
+  - Fetches agent and team context from DB using sync SQL query.
+  - Updates status to `'starting'` and publishes Redis status event.
+  - Calls `spinup_agent_container()`.
+  - Checks if agent status was changed (e.g. user clicked Stop mid-spinup). If so, tears down container immediately to prevent orphaned running containers.
+  - Updates DB record with `container_id`, `workspace_path`, `started_at`, and status (`'running'` or `'unsandboxed (dev mode)'`). Writes `AgentRun` log entry.
+- Lines 120-151: `stop_agent_task(agent_id)`: Tears down Docker container, updates agent DB status to `'stopped'`, sets `container_id = NULL`, writes `AgentRun` entry, and publishes stop event.
+- Lines 152-253: `extract_document_task(document_id)`:
+  - Reads uploaded document file from disk.
+  - Parses text content depending on file extension: uses `mammoth` for `.docx`, `pypdf` with `pdfplumber` fallback for `.pdf`, and UTF-8 text reader for `.txt`/`.md`.
+  - Splits extracted text into 500-character chunks with 50-character overlap.
+  - Generates 384-dimensional vector embeddings for each chunk via `generate_embedding()`.
+  - Deletes existing chunks and inserts new `document_chunks` into PostgreSQL converting float lists to `vector` types (`CAST(:emb AS vector)`). Updates document `extraction_status = 'done'`.
+- Lines 254-421: `process_message_task(agent_id, message_id)`:
+  - Verifies agent container status is running.
+  - Generates query embedding for user message text.
+  - Fetches document chunks attached to agent or team workspace.
+  - Calculates cosine similarity between query embedding and chunk embeddings, selecting top 6 matching chunks.
+  - Constructs system prompt embedding task context, top matching document excerpts, and standing team guidelines.
+  - Calls LLM provider `generate_sync()`.
+  - Checks if agent container was stopped while LLM call was in flight. If stopped, discards response and inserts system notice. Otherwise, saves agent reply to `agent_messages` table and broadcasts chat message event via Redis.
+- Lines 422-457: `prune_idle_agents_task(idle_hours=2)`: Periodic maintenance task. Queries DB for running agents with no activity for over 2 hours, stops their containers, updates status to `'stopped'`, and records audit log entries.
+
+Why this implementation?
+Offloading CPU-intensive RAG vector math, document parsing, and network-bound LLM API calls to Celery worker tasks keeps the main FastAPI web server responsive.
+
+----------------------------------------------------------------------------------------------------
+FILE 12: backend/app/api/auth.py
+----------------------------------------------------------------------------------------------------
+Role & Purpose:
+Authentication API endpoint router. Manages user registration, user login, JWT access token generation, refresh token creation, user profile fetching (`/me`), and user auth dependency injection (`get_current_user`).
+
+Line-by-Line / Section-by-Section Explanation:
+- Lines 1-13: Imports FastAPI dependencies, `OAuth2PasswordBearer`, Pydantic models (`RegisterSchema`, `LoginSchema`), SQLAlchemy models, and security utilities.
+- Line 14: Configures `oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")`.
+- Lines 24-34: `get_current_user()` dependency function: Decodes JWT bearer token from Authorization header, extracts `sub` user ID claim, queries DB for `User`, and returns user entity or raises HTTP 401 Unauthorized exception.
+- Lines 36-58: `@router.post("/register")`: Checks if email exists. Creates new `User` record with hashed password, creates default workspace `Team` ("{name}'s Team"), adds user as team `"owner"`, and commits transaction.
+- Lines 60-83: `@router.post("/login")`: Validates user credentials using `verify_password()`. Generates 24-hour access token and 7-day refresh token (stored as hash in `refresh_tokens` table). Returns tokens and user object.
+- Lines 85-105: `@router.get("/me")`: Returns current authenticated user profile details and list of team memberships with roles.
+
+Why this implementation?
+Automatic default team creation during registration ensures every user has an operational workspace immediately upon signing up.
+
+----------------------------------------------------------------------------------------------------
+FILE 13: backend/app/api/teams.py
+----------------------------------------------------------------------------------------------------
+Role & Purpose:
+Team Workspace API router. Handles team creation, team guideline context updates, team detail retrieval, team member additions, and team role security validation.
+
+Line-by-Line / Section-by-Section Explanation:
+- Lines 19-28: `verify_team_membership(team_id, user_id, min_role, db)`: Helper security guard. Queries `TeamMember` table. Evaluates role hierarchy weights (`member`: 1, `admin`: 2, `owner`: 3). Raises HTTP 403 Forbidden if user is not a member or lacks required role.
+- Lines 30-43: `@router.post("/")`: Creates a new team workspace, assigns creating user as `"owner"`, and writes an `AuditLog` entry.
+- Lines 45-55: `@router.get("/{team_id}")`: Returns team metadata and standing context markdown.
+- Lines 57-72: `@router.patch("/{team_id}/context")`: Requires `"admin"` role. Updates `context_md` standing team prompt guidelines injected into agents.
+- Lines 78-105: `@router.post("/{team_id}/members")`: Invites an existing user by email to join team workspace with specified role (`member` or `admin`).
+
+Why this implementation?
+Role-weighted verification (`role_weights`) enforces multi-tenant access control across team workspaces.
+
+----------------------------------------------------------------------------------------------------
+FILE 14: backend/app/api/agents.py
+----------------------------------------------------------------------------------------------------
+Role & Purpose:
+Agent Management API router. Endpoints for creating agents, listing team agents, updating task context, changing visibility (`personal` vs `team`), starting/stopping container sandboxes, managing chat threads, and posting chat messages.
+
+Line-by-Line / Section-by-Section Explanation:
+- Lines 17-27: Defines input schemas: `AgentCreateSchema`, `PostMessageSchema`, `ContextUpdateSchema`, `UpdateVisibilitySchema`.
+- Lines 29-41: `check_agent_access()`: Verifies user has access to target agent. Agent creator always has access; non-creators require team membership.
+- Lines 43-68: `@router.get("/")`: Lists team agents visible to current user (created by user OR set to `visibility="team"`).
+- Lines 70-113: `@router.post("/")`: Creates agent record with default server sandbox config (`SERVER_SANDBOX_SETTINGS`), attaches reference documents, and writes audit log.
+- Lines 137-154: `@router.delete("/{agent_id}")`: Deletes agent, triggers async container teardown if running, and writes audit log.
+- Lines 156-171: `@router.post("/{agent_id}/start")`: Updates status to `'starting'` and triggers `spinup_agent_task.delay()`.
+- Lines 173-188: `@router.post("/{agent_id}/stop")`: Updates status to `'stopping'` and triggers `stop_agent_task.delay()`.
+- Lines 208-224: `@router.get("/{agent_id}/threads")`: Returns list of distinct chat thread IDs for agent.
+- Lines 226-251: `@router.get("/{agent_id}/messages")`: Returns message history for agent and thread ID.
+- Lines 253-269: `@router.delete("/{agent_id}/threads/{thread_id}")`: Deletes all messages in specified chat thread.
+- Lines 271-306: `@router.post("/{agent_id}/messages")`: Validates agent status is `'running'`. Saves user message to DB and queues `process_message_task.delay()`.
+- Lines 308-329: `@router.patch("/{agent_id}/visibility")`: Updates visibility (`personal` vs `team`).
+
+Why this implementation?
+Requiring running status before accepting chat messages prevents orphaned message tasks when containers are stopped.
+
+----------------------------------------------------------------------------------------------------
+FILE 15: backend/app/api/documents.py
+----------------------------------------------------------------------------------------------------
+Role & Purpose:
+Document Management API router. Handles file upload ingestion (`.pdf`, `.docx`, `.txt`, `.md`), file validation, disk storage, database metadata creation, document deletion, and triggering background Celery extraction tasks.
+
+Line-by-Line / Section-by-Section Explanation:
+- Lines 16-17: Configures storage directory `DATA_DOCS_ROOT = ./data/documents`.
+- Lines 18-71: `@router.post("/{team_id}")`:
+  - Validates team membership.
+  - Validates file extension against allowed list (`pdf`, `docx`, `txt`, `md`, `csv`).
+  - Generates UUID `doc_id` and saves uploaded file to `data/documents/{team_id}/{doc_id}/{filename}`.
+  - Computes file size in bytes and creates `Document` DB record with `extraction_status="pending"`.
+  - Writes audit log and dispatches `extract_document_task.delay(doc_id)`.
+- Lines 73-98: `@router.get("/{team_id}")`: Returns list of stored documents for team.
+- Lines 100-125: `@router.delete("/{team_id}/{doc_id}")`: Deletes document record, associated vector chunks, and removes physical files from disk.
+
+Why this implementation?
+Storing files in team-partitioned directory trees (`data/documents/{team_id}/{doc_id}`) prevents filepath collisions across tenants.
+
+----------------------------------------------------------------------------------------------------
+FILE 16: backend/app/api/context_assistant.py
+----------------------------------------------------------------------------------------------------
+Role & Purpose:
+Context Brief Compiler API router. Takes raw user answers from an intake questionnaire and uses LLM prompt engineering to compile a structured, professional `MEMORY.md` project brief.
+
+Line-by-Line / Section-by-Section Explanation:
+- Lines 11-15: Defines `CompileContextSchema` (`goal`, `docs`, `constraints`, `audience`).
+- Lines 17-65: `@router.post("/compile")`:
+  - Constructs meta-prompt instructing LLM to format inputs into Markdown sections (`# Objectives`, `# Reference Documents`, `# Implementation Constraints`, `# Operational Audience`).
+  - Calls LLM provider `generate()`.
+  - Includes static template fallback generator if LLM service is unavailable, ensuring brief generation never fails.
+  - Returns `{"compiledMd": compiled_md}`.
+
+Why this implementation?
+Structured markdown briefs standardizes operational rules across all agents in a team workspace.
+
+----------------------------------------------------------------------------------------------------
+FILE 17: backend/app/api/voice.py
+----------------------------------------------------------------------------------------------------
+Role & Purpose:
+Voice Assistant API router. Receives audio recordings uploaded from the frontend microphone widget and performs speech-to-text transcription via Groq Whisper API.
+
+Line-by-Line / Section-by-Section Explanation:
+- Lines 9-61: `@router.post("/transcribe")`:
+  - Checks if `GROQ_API_KEY` is configured.
+  - Reads uploaded audio bytes.
+  - Sends multipart form payload to Groq API endpoint `https://api.groq.com/openai/v1/audio/transcriptions` requesting model `distil-whisper-large-v3-en`.
+  - Filters out common Whisper silent audio hallucination artifacts ("Thank you.", "Thanks for watching!", "Subtitles by", "Amara.org").
+  - Includes retry fallback mechanism using model `whisper-large-v3` if primary model fails.
+  - Returns transcribed text JSON response.
+
+Why this implementation?
+`distil-whisper-large-v3-en` processes audio files in under 500ms while hallucination filtering prevents empty mic recordings from sending junk prompts to LLM agents.
+
+----------------------------------------------------------------------------------------------------
+FILE 18: backend/app/api/ws.py
+----------------------------------------------------------------------------------------------------
+Role & Purpose:
+WebSocket API router. Manages real-time WebSocket connections streaming agent status changes and execution progress events to frontend clients via Redis Pub/Sub.
+
+Line-by-Line / Section-by-Section Explanation:
+- Lines 8-31: `@router.websocket("/ws/agents/{agent_id}")`:
+  - Accepts WebSocket connection (`await websocket.accept()`).
+  - Connects async Redis client (`aioredis.from_url`).
+  - Subscribes to Redis Pub/Sub channel `agent:{agent_id}:events`.
+  - Enters async message loop: fetches published messages from Redis and forwards text content over WebSocket connection (`await websocket.send_text()`).
+  - Catches `WebSocketDisconnect` and closes Redis Pub/Sub subscription cleanly.
+
+Why this implementation?
+WebSockets backed by Redis Pub/Sub enable push notifications for long-running container spin-ups without client HTTP polling.
+
+----------------------------------------------------------------------------------------------------
+FILE 19: backend/app/api/audit.py
+----------------------------------------------------------------------------------------------------
+Role & Purpose:
+Governance Audit Logs API router. Allows workspace admins and members to inspect governance activity trails recorded across their team workspace.
+
+Line-by-Line / Section-by-Section Explanation:
+- Lines 12-35: `@router.get("/")`: Validates team membership. Queries `AuditLog` table for `team_id`, ordered by `created_at` descending, capped at 100 events. Returns structured JSON log records.
+
+Why this implementation?
+Capping results at 100 records per query prevents DB memory exhaustion during governance audits.
+
+----------------------------------------------------------------------------------------------------
+FILE 20: frontend/app.py
+----------------------------------------------------------------------------------------------------
+Role & Purpose:
+Complete Streamlit web frontend application interface. Manages dark theme styling, user login/registration authentication, workspace selection, agent hub management, voice recording STT, chat rendering, document upload management, team guidelines editing, context brief compiling, and audit log tables.
+
+Line-by-Line / Section-by-Section Explanation:
+- Lines 1-7: Imports libraries (`requests`, `streamlit`, `time`). Sets backend API URL (`API_BASE_URL` default `http://localhost:8000`).
+- Lines 11-230: Streamlit page configuration and CSS injection. Injects custom CSS styling: dark mesh background gradient, glassmorphic sidebar, pill navigation tabs, glowing action buttons, chat bubbles, and status badges (`badge-running`, `badge-stopped`, `badge-devmode`, `badge-failed`).
+- Lines 235-267: Session state initialization and URL query token recovery. Restores session state from `st.query_params["token"]` on page reloads.
+- Lines 288-363: Authentication screen. Renders sign-in and registration forms. Sends POST requests to `/api/auth/login` and `/api/auth/register`. On success, stores JWT token and user info in `st.session_state`.
+- Lines 372-498: Sidebar navigation. Renders current user profile, active team workspace dropdown selector, active agent selector, ChatGPT-style sidebar chat thread list with "+ New Conversation" and thread deletion buttons.
+- Lines 522-766: Tab 1 - Agent Hub:
+  - Left column: Renders "+ Create New Agent" form with document attachment multiselect and list of team agents with status indicators.
+  - Right column: Displays agent detail view, operational `MEMORY.md` task brief expander, "Start Sandbox Container" and "Stop Sandbox Container" buttons, visibility toggles, chat message thread view container, live microphone voice recorder widget with Groq Whisper transcription trigger, and chat input field with 40-second polling for Celery worker replies.
+- Lines 770-815: Tab 2 - Document Library: Upload form for `.pdf`/`.docx`/`.txt`/`.md` files. Lists uploaded reference documents with size, status, and deletion controls.
+- Lines 819-853: Tab 3 - Team Guidelines: Text area editor for standing team guidelines (`context_md`) and invite form to add new members by email.
+- Lines 857-915: Tab 4 - Context Assistant: Questionnaire form compiling raw objective answers into structured `MEMORY.md` briefs with single-click apply buttons for team or agent contexts.
+- Lines 919-929: Tab 5 - Audit Logs: Renders governance audit trail data table using `st.dataframe()`.
+
+Why this implementation?
+Consolidating UI tabs into a single Streamlit app delivers an intuitive desktop-class portal with responsive controls.
+
+----------------------------------------------------------------------------------------------------
+FILE 21: db/init.sql
+----------------------------------------------------------------------------------------------------
+Role & Purpose:
+Database initialization SQL script executed automatically on PostgreSQL container first boot. Enables extensions (`uuid-ossp`, `pgvector`), creates ENUM types, creates all 11 database tables, and sets indexes.
+
+Line-by-Line / Section-by-Section Explanation:
+- Lines 1-3: Executes `CREATE EXTENSION IF NOT EXISTS "uuid-ossp";` and `CREATE EXTENSION IF NOT EXISTS vector;`.
+- Lines 6-28: Creates custom PostgreSQL ENUM types: `team_role`, `agent_status`, `agent_visibility`, `document_visibility`.
+- Lines 31-154: DDL statements creating all 11 tables (`users`, `teams`, `team_members`, `invites`, `agents`, `agent_runs`, `agent_messages`, `refresh_tokens`, `audit_logs`, `documents`, `document_chunks`, `agent_documents`). Note line 146 defining `embedding vector(384)` column for dense vector storage.
+- Lines 157-162: Creates performance indexes on foreign keys and search query columns (`idx_agents_team_status`, `idx_agent_runs_agent_created`, `idx_team_members_user`, `idx_agent_messages_agent`, `idx_documents_team`, `idx_document_chunks_doc`).
+
+Why this implementation?
+Automatic initialization via `/docker-entrypoint-initdb.d/init.sql` ensures zero manual SQL setup steps when launching containers via `docker-compose up`.
+
+----------------------------------------------------------------------------------------------------
+FILE 22: docker-compose.yml
+----------------------------------------------------------------------------------------------------
+Role & Purpose:
+Multi-container Docker orchestration manifest. Defines and networks 5 interconnected microservices: PostgreSQL, Redis, FastAPI Backend, Celery Worker, and Streamlit Frontend.
+
+Line-by-Line / Section-by-Section Explanation:
+- Lines 4-18: `postgres` service: Image `pgvector/pgvector:pg16`, maps port `5433:5432`, mounts `postgres_data` persistent volume and `./db/init.sql`.
+- Lines 20-27: `redis` service: Image `redis:alpine`, maps port `6379:6379`.
+- Lines 29-57: `backend` service: Builds `./backend/Dockerfile`, maps port `8000:8000`, mounts `/var/run/docker.sock` (allowing backend to launch sibling agent Docker containers), `./workspaces`, `./data`, and `./backend/app`.
+- Lines 59-87: `celery_worker` service: Builds `./backend/Dockerfile`, executes command `celery -A app.tasks.celery_app worker --loglevel=info`, mounts `/var/run/docker.sock`, `./workspaces`, and `./data`.
+- Lines 89-102: `frontend` service: Builds `./frontend/Dockerfile`, sets `API_BASE_URL=http://backend:8000`, maps port `8501:8501`.
+- Lines 104-109: Defines shared Docker bridge network `openclaw-net` and persistent named volume `postgres_data`.
+
+Why this implementation?
+Mounting `/var/run/docker.sock` into the backend and Celery containers enables Docker-in-Docker capability, allowing background workers to manage isolated agent sandbox containers dynamically.
+
+----------------------------------------------------------------------------------------------------
+FILE 23: backend/Dockerfile & frontend/Dockerfile
+----------------------------------------------------------------------------------------------------
+Role & Purpose:
+Container build definitions for packaging backend FastAPI/Celery workers and frontend Streamlit services into production Docker images.
+
+Backend Dockerfile Details:
+- Uses `python:3.11-slim` base image.
+- Installs system packages `gcc`, `g++`, `libpq-dev`.
+- Copies `requirements.txt` and runs `pip install --no-cache-dir -r requirements.txt`.
+- Copies app code and exposes port `8000`.
+- Sets CMD to `uvicorn app.main:app --host 0.0.0.0 --port 8000`.
+
+Frontend Dockerfile Details:
+- Uses `python:3.11-slim` base image.
+- Copies `requirements.txt` and installs Python packages.
+- Copies Streamlit app file `app.py`.
+- Exposes port `8501`.
+- Sets CMD to `streamlit run app.py --server.port=8501 --server.address=0.0.0.0`.
+
+Why this implementation?
+Slim Debian Python base images keep final container image sizes under 500MB while providing C build tools needed for `psycopg2` and `bcrypt`.
+
+----------------------------------------------------------------------------------------------------
+FILE 24: backend/requirements.txt & frontend/requirements.txt
+----------------------------------------------------------------------------------------------------
+Role & Purpose:
+Explicit Python dependency package lock files specifying exact version numbers for backend API/worker components and frontend UI components.
+
+Backend requirements summary:
+- `fastapi==0.111.0`, `uvicorn[standard]==0.30.1`, `pydantic==2.7.4`, `pydantic-settings==2.3.4`
+- `sqlalchemy[asyncio]==2.0.31`, `asyncpg==0.29.0`, `psycopg2-binary==2.9.9`, `pgvector==0.2.5`
+- `celery==5.4.0`, `redis==5.0.6`, `docker==7.1.0`
+- `python-jose[cryptography]==3.3.0`, `passlib[bcrypt]==1.7.4`, `bcrypt==4.1.3`
+- `httpx==0.27.0`, `sentence-transformers==3.0.1`, `mammoth==1.7.0`, `pypdf==4.2.0`, `pdfplumber==0.11.0`
+
+Frontend requirements summary:
+- `streamlit>=1.40.0`, `audio-recorder-streamlit==0.0.10`, `requests==2.32.3`, `websocket-client==1.8.0`, `pandas==2.2.2`
+
+Why this implementation?
+Pinning exact dependency versions prevents unexpected breaking changes across deployments.
+
+----------------------------------------------------------------------------------------------------
+FILE 25: test_isolation.py & test_sandbox_security.py
+----------------------------------------------------------------------------------------------------
+Role & Purpose:
+Automated test scripts for validating platform functionality and security bounds.
+- `test_isolation.py`: End-to-end 10-stage integration test suite verifying backend health check, registration/auth, team context updating, RAG document upload & embedding extraction, agent container spin-up, sandbox isolation checks, chat query processing with RAG grounding, container teardown, and audit logging.
+- `test_sandbox_security.py`: Python `unittest` suite testing Pydantic input security validation (`extra="forbid"`), verifying client container security override attempts are rejected, asserting server default sandbox boundaries, testing hard runtime error throwing when unsandboxed mode is disabled, verifying dev mode fallback behavior, and ensuring `.env` is ignored by git.
+
+Why this implementation?
+Having automated end-to-end integration tests and unit security tests ensures strict compliance with security standards and container isolation bounds.
+
+====================================================================================================
+                                      END OF TECHNICAL DOCUMENTATION
+====================================================================================================
